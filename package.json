@@ -1,0 +1,23 @@
+{
+  "name": "credit-card-tracking-app",
+  "version": "1.0.0",
+  "description": "Credit card offer tracking and optimization web app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "migrate": "node migrate.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pg": "^8.11.3",
+    "cors": "^2.8.5",
+    "path": "^0.12.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["credit-card", "tracking", "finance", "offers"],
+  "author": "",
+  "license": "MIT"
+}
