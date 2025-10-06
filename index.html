@@ -185,10 +185,16 @@
                         <div class="form-group">
                             <label for="offer-reward">Reward Amount ($):</label>
                             <input type="number" id="offer-reward" step="0.01" min="0" required>
+                            <small style="color: #666; display: block; margin-top: 0.25rem;">Base reward (or leave blank if using tiers below)</small>
                         </div>
                         <div class="form-group">
                             <label for="offer-bonus-reward">Bonus Reward ($) (if applicable):</label>
                             <input type="number" id="offer-bonus-reward" step="0.01" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label for="offer-tiers">Tiered Rewards (optional):</label>
+                            <textarea id="offer-tiers" rows="3" placeholder="Enter tiers like: 750:125&#10;1500:200&#10;(threshold:reward, one per line)"></textarea>
+                            <small style="color: #666; display: block; margin-top: 0.25rem;">For multi-tier offers: Enter "spending:reward" per line (e.g., "750:125" then "1500:200")</small>
                         </div>
                         <div class="form-group">
                             <label for="offer-description">Description:</label>

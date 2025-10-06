@@ -481,6 +481,14 @@ class OfferTracker {
             offerCategoryCheckboxes.forEach(checkbox => {
                 checkbox.checked = (offer.categories || []).includes(checkbox.value);
             });
+
+            // Populate tiers field
+            if (offer.tiers && offer.tiers.length > 0) {
+                const tiersText = offer.tiers.map(t => `${t.threshold}:${t.reward}`).join('\n');
+                document.getElementById('offer-tiers').value = tiersText;
+            } else {
+                document.getElementById('offer-tiers').value = '';
+            }
         } else {
             form.reset();
         }
@@ -513,6 +521,26 @@ class OfferTracker {
         const categoryCheckboxes = document.querySelectorAll('input[name="offer-category"]:checked');
         const categories = Array.from(categoryCheckboxes).map(cb => cb.value);
 
+        // Parse tiers from text input (format: "threshold:reward" per line)
+        const tiersText = document.getElementById('offer-tiers').value.trim();
+        const tiers = [];
+        if (tiersText) {
+            const lines = tiersText.split('\n');
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed && trimmed.includes(':')) {
+                    const [threshold, reward] = trimmed.split(':');
+                    const t = parseFloat(threshold);
+                    const r = parseFloat(reward);
+                    if (!isNaN(t) && !isNaN(r)) {
+                        tiers.push({ threshold: t, reward: r });
+                    }
+                }
+            }
+            // Sort tiers by threshold ascending
+            tiers.sort((a, b) => a.threshold - b.threshold);
+        }
+
         const offerData = {
             name: formData.get('offer-name') || document.getElementById('offer-name').value,
             type: formData.get('offer-type') || document.getElementById('offer-type').value,
@@ -524,6 +552,7 @@ class OfferTracker {
             categories: categories,
             reward: parseNumber(formData.get('offer-reward') || document.getElementById('offer-reward').value) || 0,
             bonusReward: parseNumber(formData.get('offer-bonus-reward') || document.getElementById('offer-bonus-reward').value),
+            tiers: tiers,
             description: formData.get('offer-description') || document.getElementById('offer-description').value || '',
             monthlyTracking: document.getElementById('offer-monthly-tracking').checked
         };
