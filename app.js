@@ -474,18 +474,29 @@ class OfferTracker {
         const form = document.getElementById('offer-form');
         const formData = new FormData(form);
 
+        // Helper function to safely parse numbers
+        const parseNumber = (value) => {
+            const num = parseFloat(value);
+            return isNaN(num) ? null : num;
+        };
+
+        const parseInteger = (value) => {
+            const num = parseInt(value, 10);
+            return isNaN(num) ? null : num;
+        };
+
         const offerData = {
             name: formData.get('offer-name') || document.getElementById('offer-name').value,
             type: formData.get('offer-type') || document.getElementById('offer-type').value,
             startDate: formData.get('offer-start-date') || document.getElementById('offer-start-date').value,
             endDate: formData.get('offer-end-date') || document.getElementById('offer-end-date').value,
-            spendingTarget: parseFloat(formData.get('offer-spending-target') || document.getElementById('offer-spending-target').value) || null,
-            transactionTarget: parseInt(formData.get('offer-transaction-target') || document.getElementById('offer-transaction-target').value) || null,
-            minTransaction: parseFloat(formData.get('offer-min-transaction') || document.getElementById('offer-min-transaction').value) || null,
-            category: formData.get('offer-category') || document.getElementById('offer-category').value,
-            reward: parseFloat(formData.get('offer-reward') || document.getElementById('offer-reward').value),
-            bonusReward: parseFloat(formData.get('offer-bonus-reward') || document.getElementById('offer-bonus-reward').value) || null,
-            description: formData.get('offer-description') || document.getElementById('offer-description').value,
+            spendingTarget: parseNumber(formData.get('offer-spending-target') || document.getElementById('offer-spending-target').value),
+            transactionTarget: parseInteger(formData.get('offer-transaction-target') || document.getElementById('offer-transaction-target').value),
+            minTransaction: parseNumber(formData.get('offer-min-transaction') || document.getElementById('offer-min-transaction').value),
+            category: formData.get('offer-category') || document.getElementById('offer-category').value || '',
+            reward: parseNumber(formData.get('offer-reward') || document.getElementById('offer-reward').value) || 0,
+            bonusReward: parseNumber(formData.get('offer-bonus-reward') || document.getElementById('offer-bonus-reward').value),
+            description: formData.get('offer-description') || document.getElementById('offer-description').value || '',
             monthlyTracking: document.getElementById('offer-monthly-tracking').checked
         };
 
