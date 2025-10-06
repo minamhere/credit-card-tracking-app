@@ -7,6 +7,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "migrate": "node migrate.js",
+    "migrate-categories": "node migrate-categories.js",
     "build": "node migrate.js"
   },
   "dependencies": {

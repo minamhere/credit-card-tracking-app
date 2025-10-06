@@ -215,18 +215,18 @@ class DatabaseManager {
         }
     }
 
-    // Get most common category for a merchant
+    // Get most common categories for a merchant
     async getMostCommonCategoryForMerchant(merchant) {
         try {
             const response = await fetch(`${this.baseUrl}/api/merchants/${encodeURIComponent(merchant)}/category`);
             if (!response.ok) {
-                throw new Error('Failed to fetch merchant category');
+                throw new Error('Failed to fetch merchant categories');
             }
             const result = await response.json();
-            return result.category || '';
+            return result.categories || [];
         } catch (error) {
-            console.error('Error fetching merchant category:', error);
-            return '';
+            console.error('Error fetching merchant categories:', error);
+            return [];
         }
     }
 

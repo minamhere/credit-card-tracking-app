@@ -71,7 +71,7 @@ class OfferTracker {
     async setupMerchantAutocomplete() {
         const merchantInput = document.getElementById('transaction-merchant');
         const suggestionsContainer = document.getElementById('merchant-suggestions');
-        const categorySelect = document.getElementById('transaction-category');
+        const categoryCheckboxes = document.querySelectorAll('input[name="transaction-category"]');
 
         let merchants = [];
         let currentHighlight = -1;
@@ -126,14 +126,17 @@ class OfferTracker {
             merchantInput.value = merchant;
             hideSuggestions();
 
-            // Auto-populate category
+            // Auto-populate categories
             try {
-                const commonCategory = await this.dataManager.getMostCommonCategoryForMerchant(merchant);
-                if (commonCategory) {
-                    categorySelect.value = commonCategory;
+                const commonCategories = await this.dataManager.getMostCommonCategoryForMerchant(merchant);
+                if (commonCategories && commonCategories.length > 0) {
+                    // Check the appropriate category checkboxes
+                    categoryCheckboxes.forEach(checkbox => {
+                        checkbox.checked = commonCategories.includes(checkbox.value);
+                    });
                 }
             } catch (error) {
-                console.log('Could not auto-populate category:', error);
+                console.log('Could not auto-populate categories:', error);
             }
         };
 
@@ -193,7 +196,7 @@ class OfferTracker {
     async setupEditMerchantAutocomplete() {
         const merchantInput = document.getElementById('edit-transaction-merchant');
         const suggestionsContainer = document.getElementById('edit-merchant-suggestions');
-        const categorySelect = document.getElementById('edit-transaction-category');
+        const categoryCheckboxes = document.querySelectorAll('input[name="edit-transaction-category"]');
 
         let merchants = [];
         let currentHighlight = -1;
@@ -241,14 +244,17 @@ class OfferTracker {
             merchantInput.value = merchant;
             hideSuggestions();
 
-            // Auto-populate category
+            // Auto-populate categories
             try {
-                const commonCategory = await this.dataManager.getMostCommonCategoryForMerchant(merchant);
-                if (commonCategory) {
-                    categorySelect.value = commonCategory;
+                const commonCategories = await this.dataManager.getMostCommonCategoryForMerchant(merchant);
+                if (commonCategories && commonCategories.length > 0) {
+                    // Check the appropriate category checkboxes
+                    categoryCheckboxes.forEach(checkbox => {
+                        checkbox.checked = commonCategories.includes(checkbox.value);
+                    });
                 }
             } catch (error) {
-                console.log('Could not auto-populate category:', error);
+                console.log('Could not auto-populate categories:', error);
             }
         };
 
@@ -325,11 +331,15 @@ class OfferTracker {
     async addTransaction() {
         const form = document.getElementById('transaction-form');
 
+        // Get selected categories from checkboxes
+        const categoryCheckboxes = document.querySelectorAll('input[name="transaction-category"]:checked');
+        const categories = Array.from(categoryCheckboxes).map(cb => cb.value);
+
         const transactionData = {
             date: document.getElementById('transaction-date').value,
             amount: parseFloat(document.getElementById('transaction-amount').value),
             merchant: document.getElementById('transaction-merchant').value,
-            category: document.getElementById('transaction-category').value,
+            categories: categories,
             description: document.getElementById('transaction-description').value || ''
         };
 
@@ -382,8 +392,13 @@ class OfferTracker {
         document.getElementById('edit-transaction-date').value = transaction.date;
         document.getElementById('edit-transaction-amount').value = transaction.amount;
         document.getElementById('edit-transaction-merchant').value = transaction.merchant;
-        document.getElementById('edit-transaction-category').value = transaction.category;
         document.getElementById('edit-transaction-description').value = transaction.description || '';
+
+        // Check the appropriate category checkboxes
+        const editCategoryCheckboxes = document.querySelectorAll('input[name="edit-transaction-category"]');
+        editCategoryCheckboxes.forEach(checkbox => {
+            checkbox.checked = (transaction.categories || []).includes(checkbox.value);
+        });
 
         // Show matching offers
         const matchingOffers = await this.dataManager.getMatchingOffersForTransaction(transaction);
@@ -417,11 +432,15 @@ class OfferTracker {
             return;
         }
 
+        // Get selected categories from checkboxes
+        const editCategoryCheckboxes = document.querySelectorAll('input[name="edit-transaction-category"]:checked');
+        const categories = Array.from(editCategoryCheckboxes).map(cb => cb.value);
+
         const transactionData = {
             date: document.getElementById('edit-transaction-date').value,
             amount: parseFloat(document.getElementById('edit-transaction-amount').value),
             merchant: document.getElementById('edit-transaction-merchant').value,
-            category: document.getElementById('edit-transaction-category').value,
+            categories: categories,
             description: document.getElementById('edit-transaction-description').value || ''
         };
 
@@ -674,7 +693,7 @@ class OfferTracker {
                         <div class="transaction-date">${new Date(transaction.date + 'T00:00:00').toLocaleDateString()}</div>
                         <div class="transaction-merchant">${transaction.merchant}</div>
                         ${transaction.description ? `<div style="font-size: 0.9rem; color: #666;">${transaction.description}</div>` : ''}
-                        <div class="transaction-category">${transaction.category}</div>
+                        <div class="transaction-category">${(transaction.categories || []).join(', ')}</div>
                         ${matchingOffersHtml}
                     </div>
                     <div style="text-align: right;">

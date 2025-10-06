@@ -76,11 +76,30 @@ header h1 {
     margin-bottom: 1.5rem;
 }
 
-.form-group label {
+.form-group > label {
     display: block;
     margin-bottom: 0.5rem;
     font-weight: 500;
     color: #555;
+}
+
+.checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.checkbox-group label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: normal;
+    cursor: pointer;
+}
+
+.checkbox-group input[type="checkbox"] {
+    width: auto;
+    cursor: pointer;
 }
 
 .form-group input,

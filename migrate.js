@@ -36,7 +36,7 @@ async function createTables() {
         date TEXT NOT NULL,
         amount REAL NOT NULL,
         merchant TEXT NOT NULL,
-        category TEXT NOT NULL,
+        categories TEXT[] NOT NULL DEFAULT '{}',
         description TEXT DEFAULT '',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )

@@ -199,7 +199,7 @@ app.get('/api/transactions', async (req, res) => {
       date: row.date,
       amount: row.amount,
       merchant: row.merchant,
-      category: row.category,
+      categories: row.categories || [],
       description: row.description
     }));
     res.json(transactions);
@@ -211,20 +211,20 @@ app.get('/api/transactions', async (req, res) => {
 
 app.post('/api/transactions', async (req, res) => {
   try {
-    const { date, amount, merchant, category, description } = req.body;
+    const { date, amount, merchant, categories, description } = req.body;
 
     const result = await pool.query(`
-      INSERT INTO transactions (date, amount, merchant, category, description)
+      INSERT INTO transactions (date, amount, merchant, categories, description)
       VALUES ($1, $2, $3, $4, $5)
       RETURNING *
-    `, [date, amount, merchant, category, description || '']);
+    `, [date, amount, merchant, categories || [], description || '']);
 
     const transaction = {
       id: result.rows[0].id,
       date: result.rows[0].date,
       amount: result.rows[0].amount,
       merchant: result.rows[0].merchant,
-      category: result.rows[0].category,
+      categories: result.rows[0].categories || [],
       description: result.rows[0].description
     };
 
@@ -238,14 +238,14 @@ app.post('/api/transactions', async (req, res) => {
 app.put('/api/transactions/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { date, amount, merchant, category, description } = req.body;
+    const { date, amount, merchant, categories, description } = req.body;
 
     const result = await pool.query(`
       UPDATE transactions SET
-        date = $1, amount = $2, merchant = $3, category = $4, description = $5
+        date = $1, amount = $2, merchant = $3, categories = $4, description = $5
       WHERE id = $6
       RETURNING *
-    `, [date, amount, merchant, category, description || '', id]);
+    `, [date, amount, merchant, categories || [], description || '', id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction not found' });
@@ -256,7 +256,7 @@ app.put('/api/transactions/:id', async (req, res) => {
       date: result.rows[0].date,
       amount: result.rows[0].amount,
       merchant: result.rows[0].merchant,
-      category: result.rows[0].category,
+      categories: result.rows[0].categories || [],
       description: result.rows[0].description
     };
 
@@ -299,19 +299,18 @@ app.get('/api/merchants/:merchant/category', async (req, res) => {
   try {
     const { merchant } = req.params;
     const result = await pool.query(`
-      SELECT category, COUNT(*) as count
+      SELECT UNNEST(categories) as category, COUNT(*) as count
       FROM transactions
       WHERE merchant = $1
       GROUP BY category
       ORDER BY count DESC
-      LIMIT 1
     `, [merchant]);
 
-    const category = result.rows.length > 0 ? result.rows[0].category : '';
-    res.json({ category });
+    const categories = result.rows.map(row => row.category);
+    res.json({ categories });
   } catch (err) {
-    console.error('Error fetching merchant category:', err);
-    res.status(500).json({ error: 'Failed to fetch merchant category' });
+    console.error('Error fetching merchant categories:', err);
+    res.status(500).json({ error: 'Failed to fetch merchant categories' });
   }
 });
 
