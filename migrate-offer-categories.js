@@ -9,6 +9,20 @@ async function migrateOfferCategoriesColumn() {
   console.log('Migrating offer categories column to support multiple categories...');
 
   try {
+    // Check if old 'category' column exists
+    const columnCheck = await pool.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'offers' AND column_name = 'category'
+    `);
+
+    if (columnCheck.rows.length === 0) {
+      console.log('Old category column does not exist in offers - skipping migration');
+      return;
+    }
+
+    console.log('Old category column exists in offers - performing migration...');
+
     // Step 1: Add new column for categories array
     console.log('Adding new categories column to offers table...');
     await pool.query(`
