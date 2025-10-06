@@ -79,6 +79,26 @@ class DataManager {
         return this.dbManager.importDatabase(file);
     }
 
+    // Helper function to determine which tier is reached based on spending/transactions
+    getTierReached(offer, spending, transactionCount) {
+        if (!offer.tiers || offer.tiers.length === 0) {
+            return null;
+        }
+
+        // Sort tiers by threshold descending to find highest tier reached
+        const sortedTiers = [...offer.tiers].sort((a, b) => b.threshold - a.threshold);
+
+        const value = offer.type === 'transactions' ? transactionCount : spending;
+
+        for (const tier of sortedTiers) {
+            if (value >= tier.threshold) {
+                return tier;
+            }
+        }
+
+        return null;
+    }
+
     // Progress calculation (same logic as before but with async data loading)
     async calculateOfferProgress(offer) {
         // Use local time consistently - parse date strings as local dates
@@ -129,17 +149,34 @@ class DataManager {
                 const monthTransactionCount = monthTransactions.length;
 
                 let monthCompleted = false;
-                if (offer.type === 'spending' && offer.spendingTarget) {
-                    monthCompleted = monthSpending >= offer.spendingTarget;
-                } else if (offer.type === 'transactions' && offer.transactionTarget) {
-                    monthCompleted = monthTransactionCount >= offer.transactionTarget;
+                let tierReached = null;
+                let earnedReward = 0;
+
+                // Check if offer uses tiers
+                if (offer.tiers && offer.tiers.length > 0) {
+                    tierReached = this.getTierReached(offer, monthSpending, monthTransactionCount);
+                    if (tierReached) {
+                        monthCompleted = true;
+                        earnedReward = tierReached.reward;
+                    }
+                } else {
+                    // Use traditional completion logic
+                    if (offer.type === 'spending' && offer.spendingTarget) {
+                        monthCompleted = monthSpending >= offer.spendingTarget;
+                        earnedReward = monthCompleted ? offer.reward : 0;
+                    } else if (offer.type === 'transactions' && offer.transactionTarget) {
+                        monthCompleted = monthTransactionCount >= offer.transactionTarget;
+                        earnedReward = monthCompleted ? offer.reward : 0;
+                    }
                 }
 
                 months.push({
                     month: monthStart.toLocaleString('default', { month: 'long', year: 'numeric' }),
                     spending: monthSpending,
                     transactionCount: monthTransactionCount,
-                    completed: monthCompleted
+                    completed: monthCompleted,
+                    tierReached: tierReached,
+                    earnedReward: earnedReward
                 });
 
                 // Move to next month
@@ -159,13 +196,31 @@ class DataManager {
 
             let completed = false;
             let progress = 0;
+            let tierReached = null;
+            let earnedReward = 0;
 
-            if (offer.type === 'spending' && offer.spendingTarget) {
-                progress = Math.min((totalSpending / offer.spendingTarget) * 100, 100);
-                completed = totalSpending >= offer.spendingTarget;
-            } else if (offer.type === 'transactions' && offer.transactionTarget) {
-                progress = Math.min((totalTransactions / offer.transactionTarget) * 100, 100);
-                completed = totalTransactions >= offer.transactionTarget;
+            // Check if offer uses tiers
+            if (offer.tiers && offer.tiers.length > 0) {
+                tierReached = this.getTierReached(offer, totalSpending, totalTransactions);
+                if (tierReached) {
+                    completed = true;
+                    earnedReward = tierReached.reward;
+                    // Calculate progress to highest tier
+                    const highestTier = [...offer.tiers].sort((a, b) => b.threshold - a.threshold)[0];
+                    const value = offer.type === 'transactions' ? totalTransactions : totalSpending;
+                    progress = Math.min((value / highestTier.threshold) * 100, 100);
+                }
+            } else {
+                // Traditional logic
+                if (offer.type === 'spending' && offer.spendingTarget) {
+                    progress = Math.min((totalSpending / offer.spendingTarget) * 100, 100);
+                    completed = totalSpending >= offer.spendingTarget;
+                    earnedReward = completed ? offer.reward : 0;
+                } else if (offer.type === 'transactions' && offer.transactionTarget) {
+                    progress = Math.min((totalTransactions / offer.transactionTarget) * 100, 100);
+                    completed = totalTransactions >= offer.transactionTarget;
+                    earnedReward = completed ? offer.reward : 0;
+                }
             }
 
             return {
@@ -173,7 +228,9 @@ class DataManager {
                 completed,
                 progress,
                 totalSpending,
-                totalTransactions
+                totalTransactions,
+                tierReached,
+                earnedReward
             };
         }
     }

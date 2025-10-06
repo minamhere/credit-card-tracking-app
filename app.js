@@ -596,19 +596,33 @@ class OfferTracker {
                 activeOffers++;
             }
 
-            totalPotential += offer.reward;
-            if (offer.bonusReward) {
-                totalPotential += offer.bonusReward;
+            // Calculate potential earnings
+            if (offer.tiers && offer.tiers.length > 0) {
+                // For tiered offers, use highest tier
+                const highestTier = [...offer.tiers].sort((a, b) => b.reward - a.reward)[0];
+                if (offer.monthlyTracking) {
+                    const monthCount = progress.months ? progress.months.length : 1;
+                    totalPotential += highestTier.reward * monthCount;
+                } else {
+                    totalPotential += highestTier.reward;
+                }
+            } else {
+                totalPotential += offer.reward;
+                if (offer.bonusReward) {
+                    totalPotential += offer.bonusReward;
+                }
             }
 
+            // Calculate earned amount
             let earned = 0;
-            if (offer.monthlyTracking) {
-                earned += progress.totalCompleted * offer.reward;
+            if (offer.monthlyTracking && progress.months) {
+                // Sum up earned rewards from each month
+                earned = progress.months.reduce((sum, month) => sum + (month.earnedReward || 0), 0);
                 if (offer.bonusReward && progress.totalCompleted === progress.months.length) {
                     earned += offer.bonusReward;
                 }
-            } else if (progress.completed) {
-                earned += offer.reward;
+            } else if (progress.earnedReward) {
+                earned = progress.earnedReward;
             }
             totalEarned += earned;
 
