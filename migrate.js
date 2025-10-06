@@ -23,6 +23,7 @@ async function createTables() {
         categories TEXT[] NOT NULL DEFAULT '{}',
         reward REAL NOT NULL,
         bonus_reward REAL,
+        tiers JSONB DEFAULT '[]'::jsonb,
         description TEXT DEFAULT '',
         monthly_tracking BOOLEAN NOT NULL DEFAULT false,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

@@ -96,7 +96,12 @@ class DataManager {
             // Parse transaction date as local time
             const transactionDate = new Date(t.date + 'T12:00:00');
             const isInDateRange = transactionDate >= startDate && transactionDate <= endDate;
-            const isCategoryMatch = !offer.category || t.category === offer.category;
+
+            // Check category match - if offer has categories, transaction must have at least one matching category
+            const isCategoryMatch = !offer.categories || offer.categories.length === 0 ||
+                (t.categories && t.categories.some(transactionCat =>
+                    offer.categories.includes(transactionCat)));
+
             const isMinAmountMet = !offer.minTransaction || t.amount >= offer.minTransaction;
 
             return isInDateRange && isCategoryMatch && isMinAmountMet;

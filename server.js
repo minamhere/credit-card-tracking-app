@@ -40,6 +40,7 @@ app.get('/api/offers', async (req, res) => {
       categories: row.categories || [],
       reward: row.reward,
       bonusReward: row.bonus_reward,
+      tiers: row.tiers || [],
       description: row.description,
       monthlyTracking: row.monthly_tracking
     }));
@@ -54,20 +55,20 @@ app.post('/api/offers', async (req, res) => {
   try {
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
-      minTransaction, categories, reward, bonusReward, description, monthlyTracking
+      minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking
     } = req.body;
 
     const result = await pool.query(`
       INSERT INTO offers (
         name, type, start_date, end_date, spending_target,
         transaction_target, min_transaction, categories, reward,
-        bonus_reward, description, monthly_tracking
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        bonus_reward, tiers, description, monthly_tracking
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
       transactionTarget, minTransaction, categories || [], reward,
-      bonusReward, description, monthlyTracking
+      bonusReward, JSON.stringify(tiers || []), description, monthlyTracking
     ]);
 
     const offer = {
@@ -82,6 +83,7 @@ app.post('/api/offers', async (req, res) => {
       categories: result.rows[0].categories || [],
       reward: result.rows[0].reward,
       bonusReward: result.rows[0].bonus_reward,
+      tiers: result.rows[0].tiers || [],
       description: result.rows[0].description,
       monthlyTracking: result.rows[0].monthly_tracking
     };
@@ -98,21 +100,21 @@ app.put('/api/offers/:id', async (req, res) => {
     const { id } = req.params;
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
-      minTransaction, categories, reward, bonusReward, description, monthlyTracking
+      minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking
     } = req.body;
 
     const result = await pool.query(`
       UPDATE offers SET
         name = $1, type = $2, start_date = $3, end_date = $4,
         spending_target = $5, transaction_target = $6, min_transaction = $7,
-        categories = $8, reward = $9, bonus_reward = $10, description = $11,
-        monthly_tracking = $12
-      WHERE id = $13
+        categories = $8, reward = $9, bonus_reward = $10, tiers = $11, description = $12,
+        monthly_tracking = $13
+      WHERE id = $14
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
       transactionTarget, minTransaction, categories || [], reward,
-      bonusReward, description, monthlyTracking, id
+      bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, id
     ]);
 
     if (result.rows.length === 0) {
@@ -131,6 +133,7 @@ app.put('/api/offers/:id', async (req, res) => {
       categories: result.rows[0].categories || [],
       reward: result.rows[0].reward,
       bonusReward: result.rows[0].bonus_reward,
+      tiers: result.rows[0].tiers || [],
       description: result.rows[0].description,
       monthlyTracking: result.rows[0].monthly_tracking
     };
@@ -179,6 +182,7 @@ app.get('/api/offers/:id', async (req, res) => {
       categories: result.rows[0].categories || [],
       reward: result.rows[0].reward,
       bonusReward: result.rows[0].bonus_reward,
+      tiers: result.rows[0].tiers || [],
       description: result.rows[0].description,
       monthlyTracking: result.rows[0].monthly_tracking
     };

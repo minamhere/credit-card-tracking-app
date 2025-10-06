@@ -9,6 +9,7 @@
     "migrate": "node migrate.js",
     "migrate-categories": "node migrate-categories.js",
     "migrate-offer-categories": "node migrate-offer-categories.js",
+    "migrate-add-tiers": "node migrate-add-tiers.js",
     "build": "node migrate.js"
   },
   "dependencies": {
