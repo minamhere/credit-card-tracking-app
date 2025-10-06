@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "migrate": "node migrate.js"
+    "migrate": "node migrate.js",
+    "build": "node migrate.js"
   },
   "dependencies": {
     "express": "^4.18.2",
