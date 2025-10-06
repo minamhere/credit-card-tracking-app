@@ -471,11 +471,16 @@ class OfferTracker {
             document.getElementById('offer-spending-target').value = offer.spendingTarget || '';
             document.getElementById('offer-transaction-target').value = offer.transactionTarget || '';
             document.getElementById('offer-min-transaction').value = offer.minTransaction || '';
-            document.getElementById('offer-category').value = offer.category || '';
             document.getElementById('offer-reward').value = offer.reward;
             document.getElementById('offer-bonus-reward').value = offer.bonusReward || '';
             document.getElementById('offer-description').value = offer.description || '';
             document.getElementById('offer-monthly-tracking').checked = offer.monthlyTracking || false;
+
+            // Check the appropriate category checkboxes
+            const offerCategoryCheckboxes = document.querySelectorAll('input[name="offer-category"]');
+            offerCategoryCheckboxes.forEach(checkbox => {
+                checkbox.checked = (offer.categories || []).includes(checkbox.value);
+            });
         } else {
             form.reset();
         }
@@ -504,6 +509,10 @@ class OfferTracker {
             return isNaN(num) ? null : num;
         };
 
+        // Get selected categories from checkboxes
+        const categoryCheckboxes = document.querySelectorAll('input[name="offer-category"]:checked');
+        const categories = Array.from(categoryCheckboxes).map(cb => cb.value);
+
         const offerData = {
             name: formData.get('offer-name') || document.getElementById('offer-name').value,
             type: formData.get('offer-type') || document.getElementById('offer-type').value,
@@ -512,7 +521,7 @@ class OfferTracker {
             spendingTarget: parseNumber(formData.get('offer-spending-target') || document.getElementById('offer-spending-target').value),
             transactionTarget: parseInteger(formData.get('offer-transaction-target') || document.getElementById('offer-transaction-target').value),
             minTransaction: parseNumber(formData.get('offer-min-transaction') || document.getElementById('offer-min-transaction').value),
-            category: formData.get('offer-category') || document.getElementById('offer-category').value || '',
+            categories: categories,
             reward: parseNumber(formData.get('offer-reward') || document.getElementById('offer-reward').value) || 0,
             bonusReward: parseNumber(formData.get('offer-bonus-reward') || document.getElementById('offer-bonus-reward').value),
             description: formData.get('offer-description') || document.getElementById('offer-description').value || '',
@@ -735,7 +744,7 @@ class OfferTracker {
                         ${offer.spendingTarget ? `<p><strong>Spending Target:</strong> $${offer.spendingTarget}</p>` : ''}
                         ${offer.transactionTarget ? `<p><strong>Transaction Target:</strong> ${offer.transactionTarget}</p>` : ''}
                         ${offer.minTransaction ? `<p><strong>Min Transaction:</strong> $${offer.minTransaction}</p>` : ''}
-                        ${offer.category ? `<p><strong>Category:</strong> ${offer.category}</p>` : ''}
+                        ${offer.categories && offer.categories.length > 0 ? `<p><strong>Categories:</strong> ${offer.categories.join(', ')}</p>` : ''}
                         <p>${offer.description}</p>
                     </div>
                     <div class="offer-actions">
@@ -765,21 +774,22 @@ class OfferTracker {
                     label += ' + Completion Bonus';
                 }
             } else {
-                label = offer.category ? 'Category Spending' : 'Total Spending';
+                label = (offer.categories && offer.categories.length > 0) ? 'Category Spending' : 'Total Spending';
             }
         } else if (offer.type === 'transactions' && offer.transactionTarget) {
             if (offer.monthlyTracking) {
                 label = 'Monthly Purchase Count';
             } else {
-                label = offer.category ? 'Category Purchase Count' : 'Total Purchase Count';
+                label = (offer.categories && offer.categories.length > 0) ? 'Category Purchase Count' : 'Total Purchase Count';
             }
         } else if (offer.type === 'combo') {
             label = 'Combination Offer';
         }
 
-        // Add category if specified
-        if (offer.category && !label.includes('Category')) {
-            label += ` (${offer.category.charAt(0).toUpperCase() + offer.category.slice(1)})`;
+        // Add categories if specified
+        if (offer.categories && offer.categories.length > 0 && !label.includes('Category')) {
+            const categoryNames = offer.categories.map(cat => cat.charAt(0).toUpperCase() + cat.slice(1)).join(', ');
+            label += ` (${categoryNames})`;
         }
 
         // Add minimum transaction requirement

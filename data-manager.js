@@ -197,9 +197,10 @@ class DataManager {
             // Check if transaction is within offer date range
             const isInDateRange = transactionDate >= startDate && transactionDate <= endDate;
 
-            // Check category match - transaction must have at least one category that matches the offer
-            const isCategoryMatch = !offer.category ||
-                (transaction.categories && transaction.categories.some(cat => cat === offer.category));
+            // Check category match - if offer has categories, transaction must have at least one matching category
+            const isCategoryMatch = !offer.categories || offer.categories.length === 0 ||
+                (transaction.categories && transaction.categories.some(transactionCat =>
+                    offer.categories.includes(transactionCat)));
 
             // Check minimum transaction amount
             const isMinAmountMet = !offer.minTransaction || transaction.amount >= offer.minTransaction;

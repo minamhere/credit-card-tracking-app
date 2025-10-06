@@ -20,7 +20,7 @@ async function createTables() {
         spending_target REAL,
         transaction_target INTEGER,
         min_transaction REAL,
-        category TEXT DEFAULT '',
+        categories TEXT[] NOT NULL DEFAULT '{}',
         reward REAL NOT NULL,
         bonus_reward REAL,
         description TEXT DEFAULT '',
@@ -70,7 +70,7 @@ async function insertInitialData() {
         spendingTarget: 750,
         transactionTarget: null,
         minTransaction: null,
-        category: "",
+        categories: [],
         reward: 25,
         bonusReward: 50,
         description: "Spend $750 in September, October, or November and get $25 for each month. If completed in all 3 months, get a bonus $50.",
@@ -84,7 +84,7 @@ async function insertInitialData() {
         spendingTarget: null,
         transactionTarget: 5,
         minTransaction: 75,
-        category: "",
+        categories: [],
         reward: 40,
         bonusReward: null,
         description: "Make 5 purchases of $75 or more in September, October, or November and get $40 for each month.",
@@ -98,7 +98,7 @@ async function insertInitialData() {
         spendingTarget: 750,
         transactionTarget: null,
         minTransaction: null,
-        category: "online",
+        categories: ["online"],
         reward: 75,
         bonusReward: null,
         description: "Spend $750 at Online merchants from 9/15 until 10/14, earn $75 cash back",
@@ -111,7 +111,7 @@ async function insertInitialData() {
       await pool.query(`
         INSERT INTO offers (
           name, type, start_date, end_date, spending_target,
-          transaction_target, min_transaction, category, reward,
+          transaction_target, min_transaction, categories, reward,
           bonus_reward, description, monthly_tracking
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       `, [
@@ -122,7 +122,7 @@ async function insertInitialData() {
         offer.spendingTarget,
         offer.transactionTarget,
         offer.minTransaction,
-        offer.category || '',
+        offer.categories || [],
         offer.reward,
         offer.bonusReward,
         offer.description,

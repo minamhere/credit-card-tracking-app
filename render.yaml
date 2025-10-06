@@ -4,7 +4,7 @@ services:
     name: credit-card-tracker
     runtime: node
     plan: free
-    buildCommand: npm install && npm run migrate && npm run migrate-categories
+    buildCommand: npm install && npm run migrate && npm run migrate-categories && npm run migrate-offer-categories
     startCommand: npm start
     envVars:
       - key: NODE_ENV

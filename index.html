@@ -173,14 +173,14 @@
                             <input type="number" id="offer-min-transaction" step="0.01" min="0">
                         </div>
                         <div class="form-group">
-                            <label for="offer-category">Required Category:</label>
-                            <select id="offer-category">
-                                <option value="">Any Category</option>
-                                <option value="online">Online</option>
-                                <option value="grocery">Grocery</option>
-                                <option value="gas">Gas</option>
-                                <option value="restaurant">Restaurant</option>
-                            </select>
+                            <label>Required Categories:</label>
+                            <div class="checkbox-group">
+                                <label><input type="checkbox" name="offer-category" value="general"> General</label>
+                                <label><input type="checkbox" name="offer-category" value="online"> Online</label>
+                                <label><input type="checkbox" name="offer-category" value="grocery"> Grocery</label>
+                                <label><input type="checkbox" name="offer-category" value="gas"> Gas</label>
+                                <label><input type="checkbox" name="offer-category" value="restaurant"> Restaurant</label>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="offer-reward">Reward Amount ($):</label>
