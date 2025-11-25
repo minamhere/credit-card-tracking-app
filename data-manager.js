@@ -390,26 +390,42 @@ class DataManager {
 
     canOffersOverlapMultiple(offers) {
         const compatibility = {
-            category: null,
+            categories: [],
             minTransaction: 0,
             reasons: [],
             isCompatible: true
         };
 
-        // Find category requirements
-        const categorizedOffers = offers.filter(offer => offer.category);
-        const categories = [...new Set(categorizedOffers.map(offer => offer.category))];
+        // Find category requirements - now handling categories as arrays
+        const offersWithCategories = offers.filter(offer => offer.categories && offer.categories.length > 0);
 
-        if (categories.length > 1) {
-            // Multiple different categories required - incompatible
-            compatibility.isCompatible = false;
-            return null;
-        } else if (categories.length === 1) {
-            compatibility.category = categories[0];
-            compatibility.reasons.push(`All transactions must be in ${categories[0]} category`);
-        } else {
-            compatibility.category = null;
+        if (offersWithCategories.length === 0) {
+            // No category requirements - all categories work
+            compatibility.categories = [];
             compatibility.reasons.push('Any category accepted by all offers');
+        } else {
+            // Find intersection of all category requirements
+            // Transactions matching ANY category in the intersection will satisfy all offers
+            const categorySets = offersWithCategories.map(offer => new Set(offer.categories));
+
+            // Start with first offer's categories
+            const intersection = new Set(categorySets[0]);
+
+            // Find categories that appear in at least one offer (union logic)
+            // Since offers can have multiple categories, a transaction can match any of them
+            const allCategories = new Set();
+            offersWithCategories.forEach(offer => {
+                offer.categories.forEach(cat => allCategories.add(cat));
+            });
+
+            compatibility.categories = Array.from(allCategories);
+
+            if (compatibility.categories.length > 0) {
+                compatibility.reasons.push(`Accepted categories: ${compatibility.categories.join(', ')}`);
+            } else {
+                compatibility.isCompatible = false;
+                return null;
+            }
         }
 
         // Find highest minimum transaction requirement
@@ -423,26 +439,30 @@ class DataManager {
 
     canOffersOverlap(offer1, offer2) {
         const compatibility = {
-            category: null,
+            categories: [],
             minTransaction: 0,
             reasons: []
         };
 
-        // Check category compatibility
-        if (!offer1.category && !offer2.category) {
-            compatibility.category = null; // Any category works
+        // Check category compatibility - now handling categories as arrays
+        const has1 = offer1.categories && offer1.categories.length > 0;
+        const has2 = offer2.categories && offer2.categories.length > 0;
+
+        if (!has1 && !has2) {
+            compatibility.categories = [];
             compatibility.reasons.push('Both offers accept any category');
-        } else if (offer1.category === offer2.category) {
-            compatibility.category = offer1.category;
-            compatibility.reasons.push(`Both require ${offer1.category} category`);
-        } else if (!offer1.category) {
-            compatibility.category = offer2.category;
-            compatibility.reasons.push(`Use ${offer2.category} category (required by ${offer2.name})`);
-        } else if (!offer2.category) {
-            compatibility.category = offer1.category;
-            compatibility.reasons.push(`Use ${offer1.category} category (required by ${offer1.name})`);
+        } else if (!has1) {
+            compatibility.categories = offer2.categories;
+            compatibility.reasons.push(`Use ${offer2.categories.join(', ')} (required by ${offer2.name})`);
+        } else if (!has2) {
+            compatibility.categories = offer1.categories;
+            compatibility.reasons.push(`Use ${offer1.categories.join(', ')} (required by ${offer1.name})`);
         } else {
-            return null; // Incompatible categories
+            // Both have category requirements - find union of categories
+            // Transactions matching any of these categories will count towards both
+            const allCategories = new Set([...offer1.categories, ...offer2.categories]);
+            compatibility.categories = Array.from(allCategories);
+            compatibility.reasons.push(`Use ${compatibility.categories.join(', ')} categories`);
         }
 
         // Check minimum transaction requirements
@@ -500,7 +520,7 @@ class DataManager {
                         title: `Complete: ${offer.name}`,
                         priority: 'medium',
                         period: `Now - ${offer.endDate.toLocaleDateString()}`,
-                        category: offer.category || 'any',
+                        category: (offer.categories && offer.categories.length > 0) ? offer.categories.join(', ') : 'any',
                         minTransaction: offer.minTransaction || 0,
                         offers: [offer.name],
                         strategy: this.generateSingleOfferStrategy(remaining, offer),
@@ -700,7 +720,10 @@ class DataManager {
 
         if (needs1.type === 'spending' && needs2.type === 'spending') {
             const totalNeeded = Math.max(needs1.spendingRemaining, needs2.spendingRemaining);
-            strategies.push(`Spend $${totalNeeded} in ${compatibility.category || 'any category'} to satisfy both offers`);
+            const catText = compatibility.categories && compatibility.categories.length > 0
+                ? compatibility.categories.join(', ') + ' categories'
+                : 'any category';
+            strategies.push(`Spend $${totalNeeded} in ${catText} to satisfy both offers`);
         } else if (needs1.type === 'spending' && needs2.type === 'transactions') {
             const avgPerTransaction = Math.ceil(needs1.spendingRemaining / needs2.transactionsRemaining);
             strategies.push(`Make ${needs2.transactionsRemaining} transactions averaging $${avgPerTransaction} each`);
@@ -725,8 +748,8 @@ class DataManager {
             strategies.push(`Make ${needs.transactionsRemaining} more transactions`);
         }
 
-        if (offer.category) {
-            strategies.push(`Must be in ${offer.category} category`);
+        if (offer.categories && offer.categories.length > 0) {
+            strategies.push(`Must be in ${offer.categories.join(', ')} categories`);
         }
 
         if (offer.minTransaction) {
@@ -816,8 +839,8 @@ class DataManager {
         }
 
         // Add category and minimum transaction requirements
-        if (compatibility.category) {
-            strategies.push(`🏷️ All transactions must be in ${compatibility.category} category`);
+        if (compatibility.categories && compatibility.categories.length > 0) {
+            strategies.push(`🏷️ Accepted categories: ${compatibility.categories.join(', ')}`);
         }
 
         if (compatibility.minTransaction > 0) {
@@ -957,8 +980,8 @@ class DataManager {
             }
         }
 
-        const hasOnlineCategory = offers.some(offer => offer.category === 'online');
-        const hasGroceryCategory = offers.some(offer => offer.category === 'grocery');
+        const hasOnlineCategory = offers.some(offer => offer.categories && offer.categories.includes('online'));
+        const hasGroceryCategory = offers.some(offer => offer.categories && offer.categories.includes('grocery'));
 
         if (hasOnlineCategory) {
             tips.push("Online purchases often have easy returns if needed");
@@ -1196,7 +1219,11 @@ class DataManager {
                             <div class="main-action">🛒 <strong>MAKE ${optimalPattern.totalTransactions} TRANSACTIONS</strong></div>
                             <div class="action-details">
                                 <div class="detail-item">💰 <strong>Amount:</strong> $${optimalPattern.totalSpending.toFixed(2)} total spending</div>
-                                <div class="detail-item">🏪 <strong>Where:</strong> ${overlap.compatibility.category || 'Any merchant'} purchases</div>
+                                <div class="detail-item">🏪 <strong>Where:</strong> ${
+                                    overlap.compatibility.categories && overlap.compatibility.categories.length > 0
+                                        ? overlap.compatibility.categories.join(', ') + ' purchases'
+                                        : 'Any merchant purchases'
+                                }</div>
                                 <div class="detail-item">💵 <strong>Per Transaction:</strong> Minimum $${overlap.compatibility.minTransaction} each</div>
                             </div>
                         </div>
@@ -1293,8 +1320,8 @@ class DataManager {
                     if (needs.spendingRemaining > 0) {
                         strategies.push(`   💰 **Spend:** $${needs.spendingRemaining.toFixed(2)} total`);
                     }
-                    if (offer.category) {
-                        strategies.push(`   🏪 **Where:** ${offer.category} purchases`);
+                    if (offer.categories && offer.categories.length > 0) {
+                        strategies.push(`   🏪 **Where:** ${offer.categories.join(', ')} purchases`);
                     }
                     if (offer.minTransaction) {
                         strategies.push(`   💵 **Per Transaction:** Minimum $${offer.minTransaction}`);
