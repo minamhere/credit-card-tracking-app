@@ -14,9 +14,24 @@ This guide will help you deploy the Credit Card Tracker app on your Synology NAS
 
 1. **Install Docker** via Synology Package Center if not already installed
 
-2. **Copy Project to Synology**:
-   - Upload the entire project folder to your Synology (e.g., `/volume1/docker/credit-card-tracker`)
-   - You can use File Station or SFTP/SCP
+2. **Copy Project to Synology** (choose one method):
+
+   **Method A: Download ZIP from GitHub** (Easiest)
+   - Go to: https://github.com/minamhere/credit-card-tracking-app
+   - Click the green "Code" button → "Download ZIP"
+   - Extract the ZIP on your computer
+   - Use Synology File Station to upload the extracted folder to `/volume1/docker/credit-card-tracker`
+
+   **Method B: Using File Station Web UI**
+   - Open Synology File Station in your browser
+   - Navigate to `/docker/` (create the folder if it doesn't exist)
+   - Click "Upload" → "Upload - Skip"
+   - Upload all project files to create `/docker/credit-card-tracker/`
+
+   **Method C: Using SFTP/SCP** (if you prefer command line)
+   - On your computer, navigate to the project folder
+   - Use SCP: `scp -r . your-username@your-synology-ip:/volume1/docker/credit-card-tracker`
+   - Or use an SFTP client like FileZilla, WinSCP, or Cyberduck
 
 3. **Open Synology Docker App**
 
@@ -53,14 +68,29 @@ This guide will help you deploy the Credit Card Tracker app on your Synology NAS
    cd /volume1/docker
    ```
 
-3. **Clone or copy the project**:
-   ```bash
-   # If you have git on Synology
-   git clone https://github.com/minamhere/credit-card-tracking-app.git
-   cd credit-card-tracking-app
+3. **Get the project files onto Synology** (choose one):
 
-   # Or copy files via SFTP/SCP first, then:
+   **Option A: Download from GitHub**
+   ```bash
+   # Download and extract ZIP
+   cd /volume1/docker
+   wget https://github.com/minamhere/credit-card-tracking-app/archive/refs/heads/claude/persistent-storage-multi-user-017t2U76x49T9VjvuSen4snd.zip
+   unzip persistent-storage-multi-user-017t2U76x49T9VjvuSen4snd.zip
+   mv credit-card-tracking-app-* credit-card-tracking-app
    cd credit-card-tracking-app
+   ```
+
+   **Option B: Copy via SFTP/SCP first**
+   ```bash
+   # After copying files via SFTP/SCP
+   cd /volume1/docker/credit-card-tracking-app
+   ```
+
+   **Option C: Use Synology File Station**
+   - Upload files via the web interface first
+   - Then SSH in and navigate to the folder:
+   ```bash
+   cd /volume1/docker/credit-card-tracking-app
    ```
 
 4. **Create .env file (recommended)**:
