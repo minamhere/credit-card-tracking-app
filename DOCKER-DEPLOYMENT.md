@@ -10,90 +10,99 @@ This guide will help you deploy the Credit Card Tracker app on your Synology NAS
 
 ## Quick Start (Recommended)
 
-### Option 1: Using Synology Docker GUI
+### Option 1: Import Directly from GitHub (Easiest!)
 
-1. **Install Docker** via Synology Package Center if not already installed
+This is the simplest method - no file uploads needed!
 
-2. **Copy Project to Synology** (choose one method):
+1. **Install Container Manager** via Synology Package Center
+   - Look for "Container Manager" (or "Docker" on older DSM versions)
 
-   **Method A: Download ZIP from GitHub** (Easiest)
+2. **Open Container Manager**
+
+3. **Create Project from URL**:
+   - Go to **"Project"** tab
+   - Click **"Create"**
+   - Choose **"Create with URL"** or **"Set path via URL"**
+   - Enter this URL:
+     ```
+     https://github.com/minamhere/credit-card-tracking-app
+     ```
+   - Set **Project name**: `credit-card-tracker`
+   - Click **"Next"** or **"Clone"**
+
+4. **Configure (if prompted)**:
+   - The system will detect `docker-compose.yml` automatically
+   - If asked about environment variables:
+     - Add `POSTGRES_PASSWORD` with a secure password (optional)
+     - Or leave blank to use default
+
+5. **Build and Start**:
+   - Click **"Build"** (may take a few minutes)
+   - Once built, click **"Start"**
+
+6. **Access the App**:
+   - Open browser to `http://your-synology-ip:3000`
+   - First load takes ~30 seconds (running migrations)
+
+That's it! Your data will be stored in `/volume1/docker/credit-card-tracker/postgres-data/`
+
+---
+
+### Option 2: Manual File Upload (If URL import doesn't work)
+
+If your Synology doesn't support URL import, use this method:
+
+1. **Install Container Manager** via Synology Package Center
+
+2. **Copy Project to Synology** (choose one):
+
+   **Method A: Download ZIP from GitHub**
    - Go to: https://github.com/minamhere/credit-card-tracking-app
    - Click the green "Code" button → "Download ZIP"
    - Extract the ZIP on your computer
-   - Use Synology File Station to upload the extracted folder to `/volume1/docker/credit-card-tracker`
+   - Use Synology File Station to upload the folder to `/volume1/docker/credit-card-tracker`
 
    **Method B: Using File Station Web UI**
    - Open Synology File Station in your browser
-   - Navigate to `/docker/` (create the folder if it doesn't exist)
-   - Click "Upload" → "Upload - Skip"
-   - Upload all project files to create `/docker/credit-card-tracker/`
+   - Navigate to `/docker/` (create if needed)
+   - Click "Upload" → upload all project files
+   - Create folder: `/docker/credit-card-tracker/`
 
-   **Method C: Using SFTP/SCP** (if you prefer command line)
-   - On your computer, navigate to the project folder
+   **Method C: SFTP/SCP**
    - Use SCP: `scp -r . your-username@your-synology-ip:/volume1/docker/credit-card-tracker`
-   - Or use an SFTP client like FileZilla, WinSCP, or Cyberduck
+   - Or use FileZilla, WinSCP, or Cyberduck
 
-3. **Open Synology Docker App**
-
-4. **Import docker-compose.yml**:
-   - Go to "Project" tab
-   - Click "Create"
+3. **Create Project in Container Manager**:
+   - Go to "Project" tab → "Create"
    - Set project path: `/volume1/docker/credit-card-tracker`
    - Name: `credit-card-tracker`
-   - Click "Set up via docker-compose.yml"
    - The compose file will be auto-detected
 
-5. **Configure Environment (Optional)**:
-   - Before building, you can click "Web Station" → "Environment"
-   - Add `POSTGRES_PASSWORD` with your secure password
-   - Or leave default (will use `changeme123`)
+4. **Build and Start**:
+   - Click "Build" then "Start"
 
-6. **Build and Start**:
-   - Click "Build" to build the images
-   - Once built, click "Start" to run the containers
-
-7. **Access the App**:
+5. **Access**:
    - Open browser to `http://your-synology-ip:3000`
 
-### Option 2: Using Command Line (SSH)
+### Option 3: Using Command Line (SSH)
 
 1. **SSH into your Synology**:
    ```bash
    ssh your-username@your-synology-ip
-   ```
-
-2. **Navigate to Docker directory**:
-   ```bash
    sudo -i
    cd /volume1/docker
    ```
 
-3. **Get the project files onto Synology** (choose one):
-
-   **Option A: Download from GitHub**
+2. **Download project from GitHub**:
    ```bash
-   # Download and extract ZIP
-   cd /volume1/docker
-   wget https://github.com/minamhere/credit-card-tracking-app/archive/refs/heads/claude/persistent-storage-multi-user-017t2U76x49T9VjvuSen4snd.zip
-   unzip persistent-storage-multi-user-017t2U76x49T9VjvuSen4snd.zip
+   # Download and extract
+   wget https://github.com/minamhere/credit-card-tracking-app/archive/refs/heads/claude/persistent-storage-multi-user-017t2U76x49T9VjvuSen4snd.zip -O project.zip
+   unzip project.zip
    mv credit-card-tracking-app-* credit-card-tracking-app
    cd credit-card-tracking-app
    ```
 
-   **Option B: Copy via SFTP/SCP first**
-   ```bash
-   # After copying files via SFTP/SCP
-   cd /volume1/docker/credit-card-tracking-app
-   ```
-
-   **Option C: Use Synology File Station**
-   - Upload files via the web interface first
-   - Then SSH in and navigate to the folder:
-   ```bash
-   cd /volume1/docker/credit-card-tracking-app
-   ```
-
-4. **Create .env file (recommended)**:
+3. **Create .env file (recommended)**:
    ```bash
    cp .env.example .env
    nano .env  # or vi .env
@@ -104,18 +113,18 @@ This guide will help you deploy the Credit Card Tracker app on your Synology NAS
    POSTGRES_PASSWORD=your_secure_password_here
    ```
 
-5. **Start the containers**:
+4. **Start the containers**:
    ```bash
    docker-compose up -d
    ```
 
-6. **Check status**:
+5. **Check status**:
    ```bash
    docker-compose ps
    docker-compose logs -f app
    ```
 
-7. **Access the app**:
+6. **Access the app**:
    - Open browser to `http://your-synology-ip:3000`
 
 ## Data Persistence

@@ -42,17 +42,16 @@ Each cardholder has:
 
 **See [DOCKER-DEPLOYMENT.md](DOCKER-DEPLOYMENT.md) for detailed instructions.**
 
-Quick start:
-```bash
-# 1. Copy project to your Synology (e.g., /volume1/docker/credit-card-tracker)
-# 2. SSH into Synology or use Docker GUI
-# 3. Start the containers:
-docker-compose up -d
+**Easiest method** - Import directly from GitHub URL:
+1. Open Synology **Container Manager**
+2. Go to **Project** → **Create**
+3. Choose **"Create with URL"**
+4. Enter: `https://github.com/minamhere/credit-card-tracking-app`
+5. Name: `credit-card-tracker`
+6. Click **Build** → **Start**
+7. Access at `http://your-synology-ip:3000`
 
-# 4. Access at http://your-synology-ip:3000
-```
-
-Your data will be persisted in the `postgres-data` folder.
+Your data will be persisted in the `postgres-data` folder on your Synology.
 
 ### Deploying to Render (Cloud - Free tier has 30-day database limit)
 
