@@ -11,8 +11,9 @@ services:
       POSTGRES_USER: credit_card_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme123}
     volumes:
-      # Map database data to host for persistence
-      - ./postgres-data:/var/lib/postgresql/data
+      # Use named volume for database persistence
+      # Data stored in Docker's volume directory, managed by Docker
+      - postgres-data:/var/lib/postgresql/data
     # Port mapping removed - not needed since app connects via Docker network
     # If you need to access the database externally for debugging, uncomment and change port:
     # ports:
@@ -52,4 +53,7 @@ services:
       "
 
 volumes:
+  # Named volume for PostgreSQL data persistence
+  # Docker automatically creates and manages this volume
+  # Location: /var/lib/docker/volumes/credit-card-tracker_postgres-data/_data
   postgres-data:
