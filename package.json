@@ -10,6 +10,7 @@
     "migrate-categories": "node migrate-categories.js",
     "migrate-offer-categories": "node migrate-offer-categories.js",
     "migrate-add-tiers": "node migrate-add-tiers.js",
+    "migrate-multi-user": "node migrate-multi-user.js",
     "build": "node migrate.js"
   },
   "dependencies": {

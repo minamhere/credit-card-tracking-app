@@ -10,6 +10,13 @@
     <div class="container">
         <header>
             <h1>Citi Shop Your Way - Offer Tracker</h1>
+            <div class="person-selector">
+                <label for="person-select">Card Holder:</label>
+                <select id="person-select">
+                    <option value="">Loading...</option>
+                </select>
+                <button id="manage-people-btn" class="small-btn">Manage</button>
+            </div>
         </header>
 
         <nav class="tab-nav">
@@ -21,6 +28,21 @@
 
         <!-- Database Setup Modal -->
         <!-- Database setup modal removed - PostgreSQL version auto-connects -->
+
+        <!-- People Management Modal -->
+        <div id="people-modal" class="modal">
+            <div class="modal-content">
+                <h2>Manage Card Holders</h2>
+                <div id="people-list"></div>
+                <div class="form-group">
+                    <input type="text" id="new-person-name" placeholder="New cardholder name">
+                    <button id="add-person-btn">Add</button>
+                </div>
+                <div class="form-buttons">
+                    <button type="button" id="close-people-modal">Close</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Transaction Edit Modal -->
         <div id="transaction-edit-modal" class="modal">

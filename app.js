@@ -18,6 +18,8 @@ class OfferTracker {
         console.log('onDatabaseReady called');
         // Called when database is ready
         try {
+            console.log('Loading people...');
+            await this.loadPeople();
             console.log('Rendering recommendations...');
             await this.renderRecommendations();
             console.log('Rendering dashboard...');
@@ -32,7 +34,133 @@ class OfferTracker {
         }
     }
 
+    async loadPeople() {
+        const people = await this.dataManager.dbManager.getPeople();
+        const personSelect = document.getElementById('person-select');
+        personSelect.innerHTML = '';
+
+        if (people.length === 0) {
+            personSelect.innerHTML = '<option value="">No card holders</option>';
+            return;
+        }
+
+        people.forEach(person => {
+            const option = document.createElement('option');
+            option.value = person.id;
+            option.textContent = person.name;
+            personSelect.appendChild(option);
+        });
+
+        // Set current person
+        const currentPersonId = this.dataManager.dbManager.getCurrentPerson();
+        if (currentPersonId && people.some(p => p.id == currentPersonId)) {
+            personSelect.value = currentPersonId;
+        } else {
+            // Default to first person
+            personSelect.value = people[0].id;
+            this.dataManager.dbManager.setCurrentPerson(people[0].id);
+        }
+    }
+
+    async onPersonChange() {
+        const personSelect = document.getElementById('person-select');
+        const personId = personSelect.value;
+
+        if (!personId) return;
+
+        this.dataManager.dbManager.setCurrentPerson(personId);
+
+        // Reload all data
+        await this.renderRecommendations();
+        await this.renderDashboard();
+        await this.renderTransactions();
+        await this.renderOffers();
+    }
+
+    showPeopleModal() {
+        document.getElementById('people-modal').style.display = 'block';
+        this.renderPeopleList();
+    }
+
+    hidePeopleModal() {
+        document.getElementById('people-modal').style.display = 'none';
+    }
+
+    async renderPeopleList() {
+        const people = await this.dataManager.dbManager.getPeople();
+        const peopleList = document.getElementById('people-list');
+
+        if (people.length === 0) {
+            peopleList.innerHTML = '<p>No card holders yet. Add one below.</p>';
+            return;
+        }
+
+        peopleList.innerHTML = people.map(person => `
+            <div class="person-item">
+                <span>${person.name}</span>
+                <button class="delete-btn" onclick="tracker.deletePerson(${person.id}, '${person.name}')">Delete</button>
+            </div>
+        `).join('');
+    }
+
+    async addPerson() {
+        const nameInput = document.getElementById('new-person-name');
+        const name = nameInput.value.trim();
+
+        if (!name) {
+            alert('Please enter a name');
+            return;
+        }
+
+        try {
+            await this.dataManager.dbManager.addPerson(name);
+            nameInput.value = '';
+            await this.renderPeopleList();
+            await this.loadPeople();
+        } catch (error) {
+            alert('Failed to add person: ' + error.message);
+        }
+    }
+
+    async deletePerson(id, name) {
+        if (!confirm(`Are you sure you want to delete "${name}"? This will delete all their offers and transactions.`)) {
+            return;
+        }
+
+        try {
+            await this.dataManager.dbManager.deletePerson(id);
+            await this.renderPeopleList();
+            await this.loadPeople();
+
+            // Refresh views
+            await this.renderRecommendations();
+            await this.renderDashboard();
+            await this.renderTransactions();
+            await this.renderOffers();
+        } catch (error) {
+            alert('Failed to delete person: ' + error.message);
+        }
+    }
+
     setupEventListeners() {
+        // Person selector event listeners
+        document.getElementById('person-select').addEventListener('change', () => {
+            this.onPersonChange();
+        });
+
+        document.getElementById('manage-people-btn').addEventListener('click', () => {
+            this.showPeopleModal();
+        });
+
+        document.getElementById('close-people-modal').addEventListener('click', () => {
+            this.hidePeopleModal();
+        });
+
+        document.getElementById('add-person-btn').addEventListener('click', () => {
+            this.addPerson();
+        });
+
+        // Transaction and offer event listeners
         document.getElementById('transaction-form').addEventListener('submit', (e) => {
             e.preventDefault();
             this.addTransaction();
@@ -331,6 +459,13 @@ class OfferTracker {
     async addTransaction() {
         const form = document.getElementById('transaction-form');
 
+        // Get current person
+        const personId = this.dataManager.dbManager.getCurrentPerson();
+        if (!personId) {
+            alert('Please select a card holder first');
+            return;
+        }
+
         // Get selected categories from checkboxes
         const categoryCheckboxes = document.querySelectorAll('input[name="transaction-category"]:checked');
         const categories = Array.from(categoryCheckboxes).map(cb => cb.value);
@@ -340,7 +475,8 @@ class OfferTracker {
             amount: parseFloat(document.getElementById('transaction-amount').value),
             merchant: document.getElementById('transaction-merchant').value,
             categories: categories,
-            description: document.getElementById('transaction-description').value || ''
+            description: document.getElementById('transaction-description').value || '',
+            personId: parseInt(personId)
         };
 
         // Validate required fields
@@ -432,6 +568,13 @@ class OfferTracker {
             return;
         }
 
+        // Get current person
+        const personId = this.dataManager.dbManager.getCurrentPerson();
+        if (!personId) {
+            alert('Please select a card holder first');
+            return;
+        }
+
         // Get selected categories from checkboxes
         const editCategoryCheckboxes = document.querySelectorAll('input[name="edit-transaction-category"]:checked');
         const categories = Array.from(editCategoryCheckboxes).map(cb => cb.value);
@@ -441,7 +584,8 @@ class OfferTracker {
             amount: parseFloat(document.getElementById('edit-transaction-amount').value),
             merchant: document.getElementById('edit-transaction-merchant').value,
             categories: categories,
-            description: document.getElementById('edit-transaction-description').value || ''
+            description: document.getElementById('edit-transaction-description').value || '',
+            personId: parseInt(personId)
         };
 
         // Validate required fields
@@ -541,6 +685,13 @@ class OfferTracker {
             tiers.sort((a, b) => a.threshold - b.threshold);
         }
 
+        // Get current person
+        const personId = this.dataManager.dbManager.getCurrentPerson();
+        if (!personId) {
+            alert('Please select a card holder first');
+            return;
+        }
+
         const offerData = {
             name: formData.get('offer-name') || document.getElementById('offer-name').value,
             type: formData.get('offer-type') || document.getElementById('offer-type').value,
@@ -554,7 +705,8 @@ class OfferTracker {
             bonusReward: parseNumber(formData.get('offer-bonus-reward') || document.getElementById('offer-bonus-reward').value),
             tiers: tiers,
             description: formData.get('offer-description') || document.getElementById('offer-description').value || '',
-            monthlyTracking: document.getElementById('offer-monthly-tracking').checked
+            monthlyTracking: document.getElementById('offer-monthly-tracking').checked,
+            personId: parseInt(personId)
         };
 
         if (this.currentEditingOffer) {

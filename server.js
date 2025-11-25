@@ -24,10 +24,78 @@ app.get('/', (req, res) => {
 
 // API Routes
 
+// People endpoints
+app.get('/api/people', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM people ORDER BY id');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching people:', err);
+    res.status(500).json({ error: 'Failed to fetch people' });
+  }
+});
+
+app.post('/api/people', async (req, res) => {
+  try {
+    const { name } = req.body;
+    const result = await pool.query(
+      'INSERT INTO people (name) VALUES ($1) RETURNING *',
+      [name]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating person:', err);
+    res.status(500).json({ error: 'Failed to create person' });
+  }
+});
+
+app.put('/api/people/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name } = req.body;
+    const result = await pool.query(
+      'UPDATE people SET name = $1 WHERE id = $2 RETURNING *',
+      [name, id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Person not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating person:', err);
+    res.status(500).json({ error: 'Failed to update person' });
+  }
+});
+
+app.delete('/api/people/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM people WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Person not found' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting person:', err);
+    res.status(500).json({ error: 'Failed to delete person' });
+  }
+});
+
 // Offers endpoints
 app.get('/api/offers', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM offers ORDER BY start_date');
+    const { personId } = req.query;
+    let query = 'SELECT * FROM offers';
+    let params = [];
+
+    if (personId) {
+      query += ' WHERE person_id = $1';
+      params.push(personId);
+    }
+
+    query += ' ORDER BY start_date';
+
+    const result = await pool.query(query, params);
     const offers = result.rows.map(row => ({
       id: row.id,
       name: row.name,
@@ -42,7 +110,8 @@ app.get('/api/offers', async (req, res) => {
       bonusReward: row.bonus_reward,
       tiers: row.tiers || [],
       description: row.description,
-      monthlyTracking: row.monthly_tracking
+      monthlyTracking: row.monthly_tracking,
+      personId: row.person_id
     }));
     res.json(offers);
   } catch (err) {
@@ -55,20 +124,20 @@ app.post('/api/offers', async (req, res) => {
   try {
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
-      minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking
+      minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId
     } = req.body;
 
     const result = await pool.query(`
       INSERT INTO offers (
         name, type, start_date, end_date, spending_target,
         transaction_target, min_transaction, categories, reward,
-        bonus_reward, tiers, description, monthly_tracking
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        bonus_reward, tiers, description, monthly_tracking, person_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
       transactionTarget, minTransaction, categories || [], reward,
-      bonusReward, JSON.stringify(tiers || []), description, monthlyTracking
+      bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId
     ]);
 
     const offer = {
@@ -85,7 +154,8 @@ app.post('/api/offers', async (req, res) => {
       bonusReward: result.rows[0].bonus_reward,
       tiers: result.rows[0].tiers || [],
       description: result.rows[0].description,
-      monthlyTracking: result.rows[0].monthly_tracking
+      monthlyTracking: result.rows[0].monthly_tracking,
+      personId: result.rows[0].person_id
     };
 
     res.json(offer);
@@ -100,7 +170,7 @@ app.put('/api/offers/:id', async (req, res) => {
     const { id } = req.params;
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
-      minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking
+      minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId
     } = req.body;
 
     const result = await pool.query(`
@@ -108,13 +178,13 @@ app.put('/api/offers/:id', async (req, res) => {
         name = $1, type = $2, start_date = $3, end_date = $4,
         spending_target = $5, transaction_target = $6, min_transaction = $7,
         categories = $8, reward = $9, bonus_reward = $10, tiers = $11, description = $12,
-        monthly_tracking = $13
-      WHERE id = $14
+        monthly_tracking = $13, person_id = $14
+      WHERE id = $15
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
       transactionTarget, minTransaction, categories || [], reward,
-      bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, id
+      bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId, id
     ]);
 
     if (result.rows.length === 0) {
@@ -135,7 +205,8 @@ app.put('/api/offers/:id', async (req, res) => {
       bonusReward: result.rows[0].bonus_reward,
       tiers: result.rows[0].tiers || [],
       description: result.rows[0].description,
-      monthlyTracking: result.rows[0].monthly_tracking
+      monthlyTracking: result.rows[0].monthly_tracking,
+      personId: result.rows[0].person_id
     };
 
     res.json(offer);
@@ -184,7 +255,8 @@ app.get('/api/offers/:id', async (req, res) => {
       bonusReward: result.rows[0].bonus_reward,
       tiers: result.rows[0].tiers || [],
       description: result.rows[0].description,
-      monthlyTracking: result.rows[0].monthly_tracking
+      monthlyTracking: result.rows[0].monthly_tracking,
+      personId: result.rows[0].person_id
     };
 
     res.json(offer);
@@ -197,14 +269,26 @@ app.get('/api/offers/:id', async (req, res) => {
 // Transactions endpoints
 app.get('/api/transactions', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM transactions ORDER BY date DESC');
+    const { personId } = req.query;
+    let query = 'SELECT * FROM transactions';
+    let params = [];
+
+    if (personId) {
+      query += ' WHERE person_id = $1';
+      params.push(personId);
+    }
+
+    query += ' ORDER BY date DESC';
+
+    const result = await pool.query(query, params);
     const transactions = result.rows.map(row => ({
       id: row.id,
       date: row.date,
       amount: row.amount,
       merchant: row.merchant,
       categories: row.categories || [],
-      description: row.description
+      description: row.description,
+      personId: row.person_id
     }));
     res.json(transactions);
   } catch (err) {
@@ -215,13 +299,13 @@ app.get('/api/transactions', async (req, res) => {
 
 app.post('/api/transactions', async (req, res) => {
   try {
-    const { date, amount, merchant, categories, description } = req.body;
+    const { date, amount, merchant, categories, description, personId } = req.body;
 
     const result = await pool.query(`
-      INSERT INTO transactions (date, amount, merchant, categories, description)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO transactions (date, amount, merchant, categories, description, person_id)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
-    `, [date, amount, merchant, categories || [], description || '']);
+    `, [date, amount, merchant, categories || [], description || '', personId]);
 
     const transaction = {
       id: result.rows[0].id,
@@ -229,7 +313,8 @@ app.post('/api/transactions', async (req, res) => {
       amount: result.rows[0].amount,
       merchant: result.rows[0].merchant,
       categories: result.rows[0].categories || [],
-      description: result.rows[0].description
+      description: result.rows[0].description,
+      personId: result.rows[0].person_id
     };
 
     res.json(transaction);
@@ -242,14 +327,14 @@ app.post('/api/transactions', async (req, res) => {
 app.put('/api/transactions/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { date, amount, merchant, categories, description } = req.body;
+    const { date, amount, merchant, categories, description, personId } = req.body;
 
     const result = await pool.query(`
       UPDATE transactions SET
-        date = $1, amount = $2, merchant = $3, categories = $4, description = $5
-      WHERE id = $6
+        date = $1, amount = $2, merchant = $3, categories = $4, description = $5, person_id = $6
+      WHERE id = $7
       RETURNING *
-    `, [date, amount, merchant, categories || [], description || '', id]);
+    `, [date, amount, merchant, categories || [], description || '', personId, id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction not found' });
@@ -261,7 +346,8 @@ app.put('/api/transactions/:id', async (req, res) => {
       amount: result.rows[0].amount,
       merchant: result.rows[0].merchant,
       categories: result.rows[0].categories || [],
-      description: result.rows[0].description
+      description: result.rows[0].description,
+      personId: result.rows[0].person_id
     };
 
     res.json(transaction);
