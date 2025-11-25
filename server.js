@@ -6,10 +6,17 @@ const { Pool } = require('pg');
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Determine if we should use SSL based on environment
+// For local Docker (db hostname), don't use SSL
+// For cloud providers (render, heroku, etc.), use SSL
+const dbUrl = process.env.DATABASE_URL || '';
+const isLocalDocker = dbUrl.includes('@db:') || dbUrl.includes('@localhost:');
+const shouldUseSSL = process.env.NODE_ENV === 'production' && !isLocalDocker;
+
 // Database connection
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: shouldUseSSL ? { rejectUnauthorized: false } : false
 });
 
 // Middleware
