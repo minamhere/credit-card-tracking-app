@@ -10,47 +10,73 @@ This guide will help you deploy the Credit Card Tracker app on your Synology NAS
 
 ## Quick Start (Recommended)
 
-### Option 1: Import Directly from GitHub (Easiest!)
+### Option 1: Using Git (Easiest - Recommended for DSM 7.x)
 
-This is the simplest method - no file uploads needed!
+**For Synology DSM 7.x with Container Manager**, the easiest method is using Git via SSH:
 
-1. **Install Container Manager** via Synology Package Center
-   - Look for "Container Manager" (or "Docker" on older DSM versions)
+#### Step 1: Install Git on Synology
 
-2. **Open Container Manager**
+1. **Open Package Center**
+2. Search for **"Git Server"** and install it
+   - If Git Server isn't available, we'll install via command line (see Option 1B below)
 
-3. **Create Project from URL**:
-   - Go to **"Project"** tab
-   - Click **"Create"**
-   - Choose **"Create with URL"** or **"Set path via URL"**
-   - Enter this URL:
-     ```
-     https://github.com/minamhere/credit-card-tracking-app
-     ```
-   - Set **Project name**: `credit-card-tracker`
-   - Click **"Next"** or **"Clone"**
+#### Step 1B: Install Git via Command Line (if Git Server not available)
 
-4. **Configure (if prompted)**:
-   - The system will detect `docker-compose.yml` automatically
-   - If asked about environment variables:
-     - Add `POSTGRES_PASSWORD` with a secure password (optional)
-     - Or leave blank to use default
+SSH into your Synology and run:
+```bash
+# Install via SynoCommunity (recommended)
+# First, add SynoCommunity repository to Package Center:
+# Settings → Package Sources → Add
+# Name: SynoCommunity
+# Location: https://packages.synocommunity.com/
 
-5. **Build and Start**:
-   - Click **"Build"** (may take a few minutes)
-   - Once built, click **"Start"**
+# Then install Git from Package Center, or via command line:
+ssh your-username@your-synology-ip
+sudo -i
 
-6. **Access the App**:
-   - Open browser to `http://your-synology-ip:3000`
-   - First load takes ~30 seconds (running migrations)
+# Install Git (if not using Package Center)
+# For DSM 7.x, Git is available via opkg or ipkg
+wget -O - http://bin.entware.net/x64-k3.2/installer/generic.sh | sh
+opkg update
+opkg install git
+```
 
-That's it! Your data will be stored in `/volume1/docker/credit-card-tracker/postgres-data/`
+#### Step 2: Clone Repository and Deploy
+
+```bash
+# SSH into Synology
+ssh your-username@your-synology-ip
+sudo -i
+
+# Navigate to docker directory
+cd /volume1/docker
+
+# Clone the repository
+git clone https://github.com/minamhere/credit-card-tracking-app.git credit-card-tracker
+cd credit-card-tracker
+
+# Optional: Set a secure password
+cp .env.example .env
+nano .env  # Change POSTGRES_PASSWORD
+
+# Start the containers
+docker-compose up -d
+
+# Check status
+docker-compose logs -f app
+```
+
+#### Step 3: Access the App
+- Open browser to `http://your-synology-ip:3000`
+- First load takes ~30 seconds (running migrations)
+
+Your data will be stored in `/volume1/docker/credit-card-tracker/postgres-data/`
 
 ---
 
-### Option 2: Manual File Upload (If URL import doesn't work)
+### Option 2: Manual File Upload (No Git Required)
 
-If your Synology doesn't support URL import, use this method:
+If you prefer not to install Git, use this method:
 
 1. **Install Container Manager** via Synology Package Center
 
@@ -72,13 +98,23 @@ If your Synology doesn't support URL import, use this method:
    - Use SCP: `scp -r . your-username@your-synology-ip:/volume1/docker/credit-card-tracker`
    - Or use FileZilla, WinSCP, or Cyberduck
 
-3. **Create Project in Container Manager**:
+3. **Start via SSH**:
+   ```bash
+   # SSH into Synology
+   ssh your-username@your-synology-ip
+   sudo -i
+   cd /volume1/docker/credit-card-tracker
+
+   # Start containers
+   docker-compose up -d
+   ```
+
+4. **Or Create Project in Container Manager GUI**:
+   - Open Container Manager
    - Go to "Project" tab → "Create"
    - Set project path: `/volume1/docker/credit-card-tracker`
    - Name: `credit-card-tracker`
    - The compose file will be auto-detected
-
-4. **Build and Start**:
    - Click "Build" then "Start"
 
 5. **Access**:

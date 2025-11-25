@@ -42,14 +42,23 @@ Each cardholder has:
 
 **See [DOCKER-DEPLOYMENT.md](DOCKER-DEPLOYMENT.md) for detailed instructions.**
 
-**Easiest method** - Import directly from GitHub URL:
-1. Open Synology **Container Manager**
-2. Go to **Project** → **Create**
-3. Choose **"Create with URL"**
-4. Enter: `https://github.com/minamhere/credit-card-tracking-app`
-5. Name: `credit-card-tracker`
-6. Click **Build** → **Start**
-7. Access at `http://your-synology-ip:3000`
+**Easiest method** - Using Git (DSM 7.x):
+```bash
+# 1. Install Git Server from Package Center (or via command line)
+# 2. SSH into Synology
+ssh your-username@your-synology-ip
+sudo -i
+cd /volume1/docker
+
+# 3. Clone and start
+git clone https://github.com/minamhere/credit-card-tracking-app.git credit-card-tracker
+cd credit-card-tracker
+docker-compose up -d
+
+# 4. Access at http://your-synology-ip:3000
+```
+
+**Alternative**: Download ZIP from GitHub and upload via File Station (no Git needed).
 
 Your data will be persisted in the `postgres-data` folder on your Synology.
 
