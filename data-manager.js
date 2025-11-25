@@ -283,18 +283,26 @@ class DataManager {
             const transactions = await this.getTransactions();
             const today = new Date();
 
-        // Filter for active, incomplete offers (be more lenient for debugging)
+        // Filter for active, incomplete offers
         const activeOffers = [];
         for (const offer of offers) {
             const progress = await this.calculateOfferProgress(offer);
             const startDate = new Date(offer.startDate + 'T00:00:00');
             const endDate = new Date(offer.endDate + 'T23:59:59');
 
-            // Include active/upcoming offers that aren't fully completed
-            const isEligible = (progress.status === 'active' || progress.status === 'upcoming') && (
-                progress.completed !== true ||
-                (offer.monthlyTracking && progress.months && progress.months.some(month => !month.completed))
-            );
+            // Only include offers that are:
+            // 1. Active or upcoming
+            // 2. Not completed (or for monthly tracking, have at least one incomplete month)
+            let isIncomplete = false;
+            if (offer.monthlyTracking && progress.months) {
+                // For monthly tracking, check if any month is incomplete
+                isIncomplete = progress.months.some(month => !month.completed);
+            } else {
+                // For non-monthly offers, check the completed flag
+                isIncomplete = progress.completed !== true;
+            }
+
+            const isEligible = (progress.status === 'active' || progress.status === 'upcoming') && isIncomplete;
 
             if (isEligible) {
                 activeOffers.push({
@@ -403,29 +411,34 @@ class DataManager {
             // No category requirements - all categories work
             compatibility.categories = [];
             compatibility.reasons.push('Any category accepted by all offers');
-        } else {
-            // Find intersection of all category requirements
-            // Transactions matching ANY category in the intersection will satisfy all offers
-            const categorySets = offersWithCategories.map(offer => new Set(offer.categories));
-
-            // Start with first offer's categories
-            const intersection = new Set(categorySets[0]);
-
-            // Find categories that appear in at least one offer (union logic)
-            // Since offers can have multiple categories, a transaction can match any of them
+        } else if (offersWithCategories.length < offers.length) {
+            // Some offers have categories, some don't
+            // The ones without categories accept any category, so we can use any of the specified categories
             const allCategories = new Set();
             offersWithCategories.forEach(offer => {
                 offer.categories.forEach(cat => allCategories.add(cat));
             });
-
             compatibility.categories = Array.from(allCategories);
+            compatibility.reasons.push(`Accepted categories: ${compatibility.categories.join(', ')}`);
+        } else {
+            // All offers have category requirements - find INTERSECTION
+            // Only categories that appear in ALL offers will work
+            let intersection = new Set(offersWithCategories[0].categories);
 
-            if (compatibility.categories.length > 0) {
-                compatibility.reasons.push(`Accepted categories: ${compatibility.categories.join(', ')}`);
-            } else {
+            for (let i = 1; i < offersWithCategories.length; i++) {
+                const offerCategories = new Set(offersWithCategories[i].categories);
+                intersection = new Set([...intersection].filter(cat => offerCategories.has(cat)));
+            }
+
+            compatibility.categories = Array.from(intersection);
+
+            if (compatibility.categories.length === 0) {
+                // No common categories - offers CANNOT overlap
                 compatibility.isCompatible = false;
                 return null;
             }
+
+            compatibility.reasons.push(`Common categories: ${compatibility.categories.join(', ')}`);
         }
 
         // Find highest minimum transaction requirement
@@ -441,7 +454,8 @@ class DataManager {
         const compatibility = {
             categories: [],
             minTransaction: 0,
-            reasons: []
+            reasons: [],
+            isCompatible: true
         };
 
         // Check category compatibility - now handling categories as arrays
@@ -458,11 +472,20 @@ class DataManager {
             compatibility.categories = offer1.categories;
             compatibility.reasons.push(`Use ${offer1.categories.join(', ')} (required by ${offer1.name})`);
         } else {
-            // Both have category requirements - find union of categories
-            // Transactions matching any of these categories will count towards both
-            const allCategories = new Set([...offer1.categories, ...offer2.categories]);
-            compatibility.categories = Array.from(allCategories);
-            compatibility.reasons.push(`Use ${compatibility.categories.join(', ')} categories`);
+            // Both have category requirements - find INTERSECTION
+            // Only categories that appear in BOTH offers will satisfy both
+            const set1 = new Set(offer1.categories);
+            const set2 = new Set(offer2.categories);
+            const intersection = [...set1].filter(cat => set2.has(cat));
+
+            if (intersection.length === 0) {
+                // No common categories - offers cannot overlap
+                compatibility.isCompatible = false;
+                return null;
+            }
+
+            compatibility.categories = intersection;
+            compatibility.reasons.push(`Common categories: ${intersection.join(', ')}`);
         }
 
         // Check minimum transaction requirements
