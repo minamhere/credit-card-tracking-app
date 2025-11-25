@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: credit-card-tracker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: credit_card_tracker
+      POSTGRES_USER: credit_card_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme123}
+    volumes:
+      # Map database data to host for persistence
+      - ./postgres-data:/var/lib/postgresql/data
+    ports:
+      # Expose PostgreSQL port (optional, for debugging)
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U credit_card_user -d credit_card_tracker"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Web Application
+  app:
+    build: .
+    container_name: credit-card-tracker-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://credit_card_user:${POSTGRES_PASSWORD:-changeme123}@db:5432/credit_card_tracker
+    depends_on:
+      db:
+        condition: service_healthy
+    # Run migrations on startup, then start the app
+    command: >
+      sh -c "
+        echo 'Waiting for database to be ready...' &&
+        sleep 5 &&
+        echo 'Running migrations...' &&
+        npm run migrate &&
+        npm run migrate-categories &&
+        npm run migrate-offer-categories &&
+        npm run migrate-add-tiers &&
+        npm run migrate-multi-user &&
+        echo 'Starting application...' &&
+        npm start
+      "
+
+volumes:
+  postgres-data:
