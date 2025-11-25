@@ -65,13 +65,13 @@
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>Categories:</label>
-                        <div class="checkbox-group">
-                            <label><input type="checkbox" name="edit-transaction-category" value="general"> General</label>
-                            <label><input type="checkbox" name="edit-transaction-category" value="online"> Online</label>
-                            <label><input type="checkbox" name="edit-transaction-category" value="grocery"> Grocery</label>
-                            <label><input type="checkbox" name="edit-transaction-category" value="gas"> Gas</label>
-                            <label><input type="checkbox" name="edit-transaction-category" value="restaurant"> Restaurant</label>
+                        <label>Categories (select all that apply):</label>
+                        <div id="edit-transaction-categories-checkboxes" class="checkbox-group">
+                            <!-- Dynamic checkboxes will be inserted here -->
+                        </div>
+                        <div class="custom-category-input">
+                            <input type="text" id="edit-transaction-custom-category" placeholder="Add custom category">
+                            <button type="button" id="edit-transaction-add-category-btn" class="small-btn">Add</button>
                         </div>
                     </div>
                     <div class="form-group">
@@ -126,13 +126,13 @@
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>Categories:</label>
-                        <div class="checkbox-group">
-                            <label><input type="checkbox" name="transaction-category" value="general"> General</label>
-                            <label><input type="checkbox" name="transaction-category" value="online"> Online</label>
-                            <label><input type="checkbox" name="transaction-category" value="grocery"> Grocery</label>
-                            <label><input type="checkbox" name="transaction-category" value="gas"> Gas</label>
-                            <label><input type="checkbox" name="transaction-category" value="restaurant"> Restaurant</label>
+                        <label>Categories (select all that apply):</label>
+                        <div id="transaction-categories-checkboxes" class="checkbox-group">
+                            <!-- Dynamic checkboxes will be inserted here -->
+                        </div>
+                        <div class="custom-category-input">
+                            <input type="text" id="transaction-custom-category" placeholder="Add custom category">
+                            <button type="button" id="transaction-add-category-btn" class="small-btn">Add</button>
                         </div>
                     </div>
                     <div class="form-group">
@@ -195,14 +195,15 @@
                             <input type="number" id="offer-min-transaction" step="0.01" min="0">
                         </div>
                         <div class="form-group">
-                            <label>Required Categories:</label>
-                            <div class="checkbox-group">
-                                <label><input type="checkbox" name="offer-category" value="general"> General</label>
-                                <label><input type="checkbox" name="offer-category" value="online"> Online</label>
-                                <label><input type="checkbox" name="offer-category" value="grocery"> Grocery</label>
-                                <label><input type="checkbox" name="offer-category" value="gas"> Gas</label>
-                                <label><input type="checkbox" name="offer-category" value="restaurant"> Restaurant</label>
+                            <label>Required Categories (select any that apply):</label>
+                            <div id="offer-categories-checkboxes" class="checkbox-group">
+                                <!-- Dynamic checkboxes will be inserted here -->
                             </div>
+                            <div class="custom-category-input">
+                                <input type="text" id="offer-custom-category" placeholder="Add custom category (e.g., 'retail', 'travel')">
+                                <button type="button" id="offer-add-category-btn" class="small-btn">Add</button>
+                            </div>
+                            <small style="color: #666;">Leave unchecked to accept any category</small>
                         </div>
                         <div class="form-group">
                             <label for="offer-reward">Reward Amount ($):</label>
