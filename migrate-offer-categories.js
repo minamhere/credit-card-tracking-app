@@ -1,8 +1,13 @@
 const { Pool } = require('pg');
 
+// Determine if we should use SSL based on environment
+const dbUrl = process.env.DATABASE_URL || '';
+const isLocalDocker = dbUrl.includes('@db:') || dbUrl.includes('@localhost:');
+const shouldUseSSL = process.env.NODE_ENV === 'production' && !isLocalDocker;
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: shouldUseSSL ? { rejectUnauthorized: false } : false
 });
 
 async function migrateOfferCategoriesColumn() {
