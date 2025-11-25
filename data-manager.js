@@ -283,12 +283,17 @@ class DataManager {
             const transactions = await this.getTransactions();
             const today = new Date();
 
+            console.log('[REC] Total offers loaded:', offers.length);
+            console.log('[REC] Offers:', offers.map(o => ({name: o.name, categories: o.categories})));
+
         // Filter for active, incomplete offers
         const activeOffers = [];
         for (const offer of offers) {
             const progress = await this.calculateOfferProgress(offer);
             const startDate = new Date(offer.startDate + 'T00:00:00');
             const endDate = new Date(offer.endDate + 'T23:59:59');
+
+            console.log(`[REC] ${offer.name}: status=${progress.status}, completed=${progress.completed}`);
 
             // Only include offers that are:
             // 1. Active or upcoming
@@ -304,6 +309,8 @@ class DataManager {
 
             const isEligible = (progress.status === 'active' || progress.status === 'upcoming') && isIncomplete;
 
+            console.log(`[REC] ${offer.name}: isEligible=${isEligible} (isIncomplete=${isIncomplete})`);
+
             if (isEligible) {
                 activeOffers.push({
                     ...offer,
@@ -314,13 +321,27 @@ class DataManager {
             }
         }
 
+        console.log('[REC] Active incomplete offers:', activeOffers.length);
+        console.log('[REC] Active offers:', activeOffers.map(o => ({name: o.name, categories: o.categories})));
+
         if (activeOffers.length === 0) {
             return { recommendations: [], overlaps: [], masterStrategy: null };
         }
 
             // Find overlapping periods and offers
             const overlaps = this.findOfferOverlaps(activeOffers, today);
+            console.log('[REC] Found overlaps:', overlaps.length);
+            overlaps.forEach((overlap, i) => {
+                console.log(`[REC] Overlap ${i+1}:`, {
+                    offerCount: overlap.offerCount,
+                    offers: overlap.offers.map(o => o.name),
+                    categories: overlap.compatibility?.categories,
+                    compatible: overlap.compatibility?.isCompatible
+                });
+            });
+
             const recommendations = await this.generateSpendingRecommendations(overlaps, activeOffers, today);
+            console.log('[REC] Generated recommendations:', recommendations.length);
 
             // Generate master strategy for dashboard
             const masterStrategy = await this.generateMasterStrategy(activeOffers, overlaps, today);
