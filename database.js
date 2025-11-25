@@ -5,6 +5,16 @@ class DatabaseManager {
     constructor() {
         this.initialized = false;
         this.baseUrl = window.location.origin;
+        this.currentPersonId = localStorage.getItem('currentPersonId') || null;
+    }
+
+    setCurrentPerson(personId) {
+        this.currentPersonId = personId;
+        localStorage.setItem('currentPersonId', personId);
+    }
+
+    getCurrentPerson() {
+        return this.currentPersonId;
     }
 
     async initialize() {
@@ -39,10 +49,87 @@ class DatabaseManager {
         }
     }
 
+    // People methods
+    async getPeople() {
+        try {
+            const response = await fetch(`${this.baseUrl}/api/people`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch people');
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching people:', error);
+            return [];
+        }
+    }
+
+    async addPerson(name) {
+        try {
+            const response = await fetch(`${this.baseUrl}/api/people`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to add person');
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Error adding person:', error);
+            throw error;
+        }
+    }
+
+    async updatePerson(id, name) {
+        try {
+            const response = await fetch(`${this.baseUrl}/api/people/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to update person');
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Error updating person:', error);
+            throw error;
+        }
+    }
+
+    async deletePerson(id) {
+        try {
+            const response = await fetch(`${this.baseUrl}/api/people/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to delete person');
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Error deleting person:', error);
+            throw error;
+        }
+    }
+
     // Offers methods
     async getOffers() {
         try {
-            const response = await fetch(`${this.baseUrl}/api/offers`);
+            let url = `${this.baseUrl}/api/offers`;
+            if (this.currentPersonId) {
+                url += `?personId=${this.currentPersonId}`;
+            }
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error('Failed to fetch offers');
             }
@@ -131,7 +218,11 @@ class DatabaseManager {
     // Transactions methods
     async getTransactions() {
         try {
-            const response = await fetch(`${this.baseUrl}/api/transactions`);
+            let url = `${this.baseUrl}/api/transactions`;
+            if (this.currentPersonId) {
+                url += `?personId=${this.currentPersonId}`;
+            }
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error('Failed to fetch transactions');
             }
