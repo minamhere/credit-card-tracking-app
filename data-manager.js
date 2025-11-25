@@ -498,9 +498,10 @@ class DataManager {
                         `Overlap Opportunity: ${offers.map(o => o.name).join(' + ')}`,
                     priority: offers.length > 2 ? 'ultra-high' : 'high',
                     period: `${overlap.startDate.toLocaleDateString()} - ${overlap.endDate.toLocaleDateString()}`,
-                    category: comp.category || 'any',
+                    category: (comp.categories && comp.categories.length > 0) ? comp.categories.join(', ') : 'any',
                     minTransaction: comp.minTransaction,
                     offers: offers.map(o => o.name),
+                    offerIds: offers.map(o => o.id), // Store IDs for subset detection
                     strategy: this.generateDetailedOptimalStrategy(offers, remainingNeeds, comp, overlap.startDate, overlap.endDate),
                     savings: this.calculateMultiOfferSavings(remainingNeeds, offers),
                     offerCount: offers.length
@@ -510,28 +511,49 @@ class DataManager {
             }
         }
 
-        // Add individual offer recommendations for non-overlapping offers
+        // Filter out recommendations that are subsets of larger recommendations
+        // This ensures we only show the maximal (largest) combinations for minimum spending
+        const filteredRecommendations = recommendations.filter(rec => {
+            // Check if there's a larger recommendation that contains all of rec's offers
+            const isSubset = recommendations.some(other => {
+                if (other === rec) return false; // Don't compare to itself
+                if (other.offerCount <= rec.offerCount) return false; // Only check larger combinations
+
+                // Check if rec's offers are a subset of other's offers
+                return rec.offerIds.every(offerId => other.offerIds.includes(offerId));
+            });
+
+            return !isSubset; // Keep recommendations that are NOT subsets
+        });
+
+        // Add individual offer recommendations for offers not included in any overlap
         for (const offer of allOffers) {
-            const hasOverlap = overlaps.some(o => o.offers.includes(offer));
-            if (!hasOverlap) {
-                const remaining = this.calculateRemainingNeedsWithProgress(offer, offer.progress, today, offer.endDate);
+            // Check if this offer appears in any of the filtered recommendations
+            const inFilteredRecs = filteredRecommendations.some(rec =>
+                rec.offerIds && rec.offerIds.includes(offer.id)
+            );
+
+            if (!inFilteredRecs) {
+                const remaining = await this.calculateRemainingNeedsWithProgress(offer, offer.progress, today, offer.endDate);
                 if (remaining.needed) {
-                    recommendations.push({
+                    filteredRecommendations.push({
                         title: `Complete: ${offer.name}`,
                         priority: 'medium',
                         period: `Now - ${offer.endDate.toLocaleDateString()}`,
                         category: (offer.categories && offer.categories.length > 0) ? offer.categories.join(', ') : 'any',
                         minTransaction: offer.minTransaction || 0,
                         offers: [offer.name],
+                        offerIds: [offer.id],
                         strategy: this.generateSingleOfferStrategy(remaining, offer),
-                        savings: null
+                        savings: null,
+                        offerCount: 1
                     });
                 }
             }
         }
 
         // Sort by priority (ultra-high > high > medium) and offer count
-        recommendations.sort((a, b) => {
+        filteredRecommendations.sort((a, b) => {
             const priorityOrder = { 'ultra-high': 3, 'high': 2, 'medium': 1 };
             const aPriority = priorityOrder[a.priority] || 0;
             const bPriority = priorityOrder[b.priority] || 0;
@@ -542,7 +564,7 @@ class DataManager {
             return 0;
         });
 
-        return recommendations;
+        return filteredRecommendations;
     }
 
     async calculateRemainingNeeds(offer, periodStart, periodEnd) {
