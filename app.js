@@ -3,12 +3,60 @@ class OfferTracker {
         this.dataManager = new DataManager();
         this.currentEditingOffer = null;
         this.personalConfig = this.dataManager.getPersonalConfig();
+        // Initialize with default categories
+        this.availableCategories = this.loadCategories();
         this.init();
+    }
+
+    loadCategories() {
+        // Load from localStorage or use defaults
+        const stored = localStorage.getItem('availableCategories');
+        if (stored) {
+            return JSON.parse(stored);
+        }
+        // Default categories
+        return ['general', 'online', 'grocery', 'gas', 'restaurant', 'retail', 'travel', 'dining'];
+    }
+
+    saveCategories() {
+        localStorage.setItem('availableCategories', JSON.stringify(this.availableCategories));
+    }
+
+    addCategory(category) {
+        const normalized = category.toLowerCase().trim();
+        if (normalized && !this.availableCategories.includes(normalized)) {
+            this.availableCategories.push(normalized);
+            this.availableCategories.sort();
+            this.saveCategories();
+            this.renderCategoryCheckboxes();
+        }
+    }
+
+    renderCategoryCheckboxes() {
+        // Render for transaction form
+        this.renderCheckboxesInContainer('transaction-categories-checkboxes', 'transaction-category');
+        // Render for edit transaction form
+        this.renderCheckboxesInContainer('edit-transaction-categories-checkboxes', 'edit-transaction-category');
+        // Render for offer form
+        this.renderCheckboxesInContainer('offer-categories-checkboxes', 'offer-category');
+    }
+
+    renderCheckboxesInContainer(containerId, inputName) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        container.innerHTML = this.availableCategories.map(cat => `
+            <label>
+                <input type="checkbox" name="${inputName}" value="${cat}">
+                ${cat.charAt(0).toUpperCase() + cat.slice(1)}
+            </label>
+        `).join('');
     }
 
     async init() {
         this.setupEventListeners();
         this.setupTabs();
+        this.renderCategoryCheckboxes();
 
         // Initialize database (will show modal)
         await this.dataManager.initialize();
@@ -160,6 +208,25 @@ class OfferTracker {
             this.addPerson();
         });
 
+        // Category management event listeners
+        document.getElementById('offer-add-category-btn').addEventListener('click', () => {
+            const input = document.getElementById('offer-custom-category');
+            this.addCategory(input.value);
+            input.value = '';
+        });
+
+        document.getElementById('transaction-add-category-btn').addEventListener('click', () => {
+            const input = document.getElementById('transaction-custom-category');
+            this.addCategory(input.value);
+            input.value = '';
+        });
+
+        document.getElementById('edit-transaction-add-category-btn').addEventListener('click', () => {
+            const input = document.getElementById('edit-transaction-custom-category');
+            this.addCategory(input.value);
+            input.value = '';
+        });
+
         // Transaction and offer event listeners
         document.getElementById('transaction-form').addEventListener('submit', (e) => {
             e.preventDefault();
@@ -199,7 +266,6 @@ class OfferTracker {
     async setupMerchantAutocomplete() {
         const merchantInput = document.getElementById('transaction-merchant');
         const suggestionsContainer = document.getElementById('merchant-suggestions');
-        const categoryCheckboxes = document.querySelectorAll('input[name="transaction-category"]');
 
         let merchants = [];
         let currentHighlight = -1;
@@ -254,11 +320,12 @@ class OfferTracker {
             merchantInput.value = merchant;
             hideSuggestions();
 
-            // Auto-populate categories
+            // Auto-populate categories - query checkboxes dynamically
             try {
                 const commonCategories = await this.dataManager.getMostCommonCategoryForMerchant(merchant);
                 if (commonCategories && commonCategories.length > 0) {
-                    // Check the appropriate category checkboxes
+                    // Query checkboxes fresh each time (in case categories were added)
+                    const categoryCheckboxes = document.querySelectorAll('input[name="transaction-category"]');
                     categoryCheckboxes.forEach(checkbox => {
                         checkbox.checked = commonCategories.includes(checkbox.value);
                     });
@@ -324,7 +391,6 @@ class OfferTracker {
     async setupEditMerchantAutocomplete() {
         const merchantInput = document.getElementById('edit-transaction-merchant');
         const suggestionsContainer = document.getElementById('edit-merchant-suggestions');
-        const categoryCheckboxes = document.querySelectorAll('input[name="edit-transaction-category"]');
 
         let merchants = [];
         let currentHighlight = -1;
@@ -372,11 +438,12 @@ class OfferTracker {
             merchantInput.value = merchant;
             hideSuggestions();
 
-            // Auto-populate categories
+            // Auto-populate categories - query checkboxes dynamically
             try {
                 const commonCategories = await this.dataManager.getMostCommonCategoryForMerchant(merchant);
                 if (commonCategories && commonCategories.length > 0) {
-                    // Check the appropriate category checkboxes
+                    // Query checkboxes fresh each time (in case categories were added)
+                    const categoryCheckboxes = document.querySelectorAll('input[name="edit-transaction-category"]');
                     categoryCheckboxes.forEach(checkbox => {
                         checkbox.checked = commonCategories.includes(checkbox.value);
                     });
