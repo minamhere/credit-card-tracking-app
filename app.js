@@ -839,9 +839,9 @@ class OfferTracker {
                 return `
                     <div class="offer-card">
                         <div style="margin-bottom: 0.5rem;">
-                            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; margin-bottom: 0.25rem;">
-                                <div class="offer-name" style="margin-bottom: 0.25rem; flex: 1 1 100%; min-width: 0;">${offer.name}</div>
-                                <div style="flex: 1 1 auto; text-align: right; margin-left: auto;">
+                            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 0.5rem; margin-bottom: 0.25rem;">
+                                <div class="offer-name" style="margin-bottom: 0.25rem; flex: 1 1 60%; min-width: 200px;">${offer.name}</div>
+                                <div style="flex: 0 1 auto; text-align: right; white-space: nowrap;">
                                     <div style="font-size: 1.1em; font-weight: bold;">
                                         ${offer.monthlyTracking && progress.months ?
                                             `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
