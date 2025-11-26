@@ -255,24 +255,34 @@ class OfferTracker {
         });
 
         // Set up merchant autocomplete
-        this.setupMerchantAutocomplete();
+        this.setupMerchantDropdown();
         this.setupEditMerchantAutocomplete();
     }
 
-    async setupMerchantAutocomplete() {
-        const merchantInput = document.getElementById('transaction-merchant');
-        const suggestionsContainer = document.getElementById('merchant-suggestions');
+    async setupMerchantDropdown() {
+        const merchantSelect = document.getElementById('transaction-merchant-select');
+        const newMerchantContainer = document.getElementById('new-merchant-container');
+        const newMerchantInput = document.getElementById('transaction-merchant-new');
 
-        let merchants = [];
-        let currentHighlight = -1;
-
-        // Load merchants when database is ready
+        // Load and populate merchant dropdown
         const loadMerchants = async () => {
             try {
-                merchants = await this.dataManager.getUniqueMerchants();
+                const merchants = await this.dataManager.getUniqueMerchants();
+
+                // Clear existing options except the first two (prompt and "Add New")
+                while (merchantSelect.options.length > 2) {
+                    merchantSelect.remove(2);
+                }
+
+                // Add merchants to dropdown
+                merchants.forEach(merchant => {
+                    const option = document.createElement('option');
+                    option.value = merchant;
+                    option.textContent = merchant;
+                    merchantSelect.insertBefore(option, merchantSelect.options[1]); // Insert before "Add New"
+                });
             } catch (error) {
                 console.log('Could not load merchants yet:', error);
-                merchants = [];
             }
         };
 
@@ -286,41 +296,12 @@ class OfferTracker {
             await loadMerchants();
         };
 
-        // Filter and display suggestions
-        const showSuggestions = (filter) => {
-            const filtered = merchants.filter(merchant =>
-                merchant.toLowerCase().includes(filter.toLowerCase())
-            );
-
-            if (filtered.length === 0 || (filtered.length === 1 && filtered[0].toLowerCase() === filter.toLowerCase())) {
-                suggestionsContainer.classList.remove('active');
-                return;
-            }
-
-            suggestionsContainer.innerHTML = filtered.map((merchant, index) =>
-                `<div class="autocomplete-suggestion" data-index="${index}">${merchant}</div>`
-            ).join('');
-
-            suggestionsContainer.classList.add('active');
-            currentHighlight = -1;
-        };
-
-        // Hide suggestions
-        const hideSuggestions = () => {
-            suggestionsContainer.classList.remove('active');
-            currentHighlight = -1;
-        };
-
-        // Select merchant and auto-populate category
+        // Handle merchant selection
         const selectMerchant = async (merchant) => {
-            merchantInput.value = merchant;
-            hideSuggestions();
-
-            // Auto-populate categories - query checkboxes dynamically
+            // Auto-populate categories for selected merchant
             try {
                 const commonCategories = await this.dataManager.getMostCommonCategoryForMerchant(merchant);
                 if (commonCategories && commonCategories.length > 0) {
-                    // Query checkboxes fresh each time (in case categories were added)
                     const categoryCheckboxes = document.querySelectorAll('input[name="transaction-category"]');
                     categoryCheckboxes.forEach(checkbox => {
                         checkbox.checked = commonCategories.includes(checkbox.value);
@@ -331,57 +312,36 @@ class OfferTracker {
             }
         };
 
-        // Event listeners
-        merchantInput.addEventListener('input', (e) => {
-            const value = e.target.value.trim();
-            if (value.length > 0) {
-                showSuggestions(value);
+        // Event listener for merchant selection
+        merchantSelect.addEventListener('change', async (e) => {
+            const selectedValue = e.target.value;
+
+            if (selectedValue === '__ADD_NEW__') {
+                // Show new merchant input
+                newMerchantContainer.style.display = 'block';
+                newMerchantInput.required = true;
+                newMerchantInput.focus();
+
+                // Clear categories to allow manual selection
+                const categoryCheckboxes = document.querySelectorAll('input[name="transaction-category"]');
+                categoryCheckboxes.forEach(checkbox => {
+                    checkbox.checked = false;
+                });
+            } else if (selectedValue) {
+                // Hide new merchant input
+                newMerchantContainer.style.display = 'none';
+                newMerchantInput.required = false;
+                newMerchantInput.value = '';
+
+                // Auto-populate categories for existing merchant
+                await selectMerchant(selectedValue);
             } else {
-                hideSuggestions();
+                // Empty selection - hide new merchant input
+                newMerchantContainer.style.display = 'none';
+                newMerchantInput.required = false;
+                newMerchantInput.value = '';
             }
         });
-
-        merchantInput.addEventListener('blur', (e) => {
-            // Delay hiding to allow click on suggestions
-            setTimeout(() => {
-                if (!suggestionsContainer.contains(document.activeElement)) {
-                    hideSuggestions();
-                }
-            }, 150);
-        });
-
-        merchantInput.addEventListener('keydown', (e) => {
-            const suggestions = suggestionsContainer.querySelectorAll('.autocomplete-suggestion');
-
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                currentHighlight = Math.min(currentHighlight + 1, suggestions.length - 1);
-                updateHighlight(suggestions);
-            } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                currentHighlight = Math.max(currentHighlight - 1, -1);
-                updateHighlight(suggestions);
-            } else if (e.key === 'Enter' && currentHighlight >= 0) {
-                e.preventDefault();
-                const selectedMerchant = suggestions[currentHighlight].textContent;
-                selectMerchant(selectedMerchant);
-            } else if (e.key === 'Escape') {
-                hideSuggestions();
-            }
-        });
-
-        suggestionsContainer.addEventListener('click', (e) => {
-            if (e.target.classList.contains('autocomplete-suggestion')) {
-                selectMerchant(e.target.textContent);
-            }
-        });
-
-        // Update highlight
-        const updateHighlight = (suggestions) => {
-            suggestions.forEach((suggestion, index) => {
-                suggestion.classList.toggle('highlighted', index === currentHighlight);
-            });
-        };
     }
 
     async setupEditMerchantAutocomplete() {
@@ -533,10 +493,16 @@ class OfferTracker {
         const categoryCheckboxes = document.querySelectorAll('input[name="transaction-category"]:checked');
         const categories = Array.from(categoryCheckboxes).map(cb => cb.value);
 
+        // Get merchant from dropdown or new merchant input
+        const merchantSelect = document.getElementById('transaction-merchant-select');
+        const merchantValue = merchantSelect.value === '__ADD_NEW__'
+            ? document.getElementById('transaction-merchant-new').value
+            : merchantSelect.value;
+
         const transactionData = {
             date: document.getElementById('transaction-date').value,
             amount: parseFloat(document.getElementById('transaction-amount').value),
-            merchant: document.getElementById('transaction-merchant').value,
+            merchant: merchantValue,
             categories: categories,
             description: document.getElementById('transaction-description').value || '',
             personId: parseInt(personId)
@@ -552,6 +518,12 @@ class OfferTracker {
 
         form.reset();
         document.getElementById('transaction-date').valueAsDate = new Date();
+
+        // Reset merchant dropdown and hide new merchant input
+        merchantSelect.value = '';
+        document.getElementById('new-merchant-container').style.display = 'none';
+        document.getElementById('transaction-merchant-new').value = '';
+        document.getElementById('transaction-merchant-new').required = false;
 
         // Update all views
         await this.renderTransactions();
@@ -850,49 +822,46 @@ class OfferTracker {
 
                 const tierBadge = getTierBadge(offer);
 
-                // Render transactions
+                // Render transactions in condensed format: Date - Merchant - Amount - Categories
                 const transactionsHtml = offer.transactions.length > 0 ? `
-                    <div style="margin-top: 1rem; padding: 1rem; background: #f8f9fa; border-radius: 5px;">
-                        <strong>Qualifying Transactions (${offer.transactions.length}):</strong>
-                        <div style="margin-top: 0.5rem; max-height: 200px; overflow-y: auto;">
+                    <div style="margin-top: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 5px;">
+                        <strong style="font-size: 0.9em;">Qualifying Transactions (${offer.transactions.length}):</strong>
+                        <div style="margin-top: 0.5rem; max-height: 150px; overflow-y: auto; font-size: 0.85em;">
                             ${offer.transactions.map(t => `
-                                <div style="padding: 0.5rem; margin: 0.25rem 0; background: white; border-radius: 3px; font-size: 0.9em;">
-                                    <div style="display: flex; justify-content: space-between;">
-                                        <span>${new Date(t.date).toLocaleDateString()}</span>
-                                        <strong>$${t.amount.toFixed(2)}</strong>
-                                    </div>
-                                    <div style="color: #666;">${t.merchant}</div>
-                                    ${t.categories && t.categories.length > 0 ? `<div style="color: #666; font-size: 0.85em;">${t.categories.join(', ')}</div>` : ''}
+                                <div style="padding: 0.25rem 0; border-bottom: 1px solid #dee2e6;">
+                                    ${new Date(t.date).toLocaleDateString()} • ${t.merchant} • <strong>$${t.amount.toFixed(2)}</strong>${t.categories && t.categories.length > 0 ? ` • ${t.categories.join(', ')}` : ''}
                                 </div>
                             `).join('')}
                         </div>
                     </div>
-                ` : '<div style="margin-top: 1rem; padding: 1rem; background: #fff3cd; border-radius: 5px; color: #856404;"><em>No qualifying transactions yet</em></div>';
+                ` : '<div style="margin-top: 0.75rem; padding: 0.5rem; background: #fff3cd; border-radius: 5px; color: #856404; font-size: 0.85em;"><em>No qualifying transactions yet</em></div>';
 
                 return `
                     <div class="offer-card">
-                        <div class="offer-header">
-                            <div class="offer-name">${offer.name}</div>
-                            <div class="offer-reward">$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward} bonus` : ''}</div>
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+                            <div style="flex: 1;">
+                                <div class="offer-name" style="margin-bottom: 0.25rem;">${offer.name}</div>
+                                <div style="margin: 0.25rem 0;">
+                                    <span style="background: ${tierBadge.color}; color: white; padding: 0.2rem 0.5rem; border-radius: 3px; font-weight: bold; font-size: 0.75em;">
+                                        ${tierBadge.text}
+                                    </span>
+                                    <span class="status-badge status-${progress.status}" style="margin-left: 0.5rem; font-size: 0.75em; padding: 0.2rem 0.5rem;">${progress.status.toUpperCase()}</span>
+                                    <span class="offer-type-badge" style="margin-left: 0.5rem; font-size: 0.75em; padding: 0.2rem 0.5rem;">${this.getOfferTypeLabel(offer)}</span>
+                                </div>
+                            </div>
+                            <div style="text-align: right; margin-left: 1rem;">
+                                <div style="font-size: 1.1em; font-weight: bold; white-space: nowrap;">$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}</div>
+                                <div style="font-size: 0.8em; color: #666;">Earned: $${earned.toFixed(2)}</div>
+                            </div>
                         </div>
-                        <div style="margin: 0.5rem 0;">
-                            <span style="background: ${tierBadge.color}; color: white; padding: 0.25rem 0.75rem; border-radius: 3px; font-weight: bold; font-size: 0.85em;">
-                                ${tierBadge.text}
-                            </span>
-                            <span class="status-badge status-${progress.status}" style="margin-left: 0.5rem;">${progress.status.toUpperCase()}</span>
-                            <span class="offer-type-badge" style="margin-left: 0.5rem;">${this.getOfferTypeLabel(offer)}</span>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.85em; color: #666; margin-bottom: 0.5rem;">
+                            <div>${offer.startDate.toLocaleDateString()} - ${offer.endDate.toLocaleDateString()}</div>
+                            <div>${offer.expired ? `Expired ${Math.abs(offer.daysUntilExpiration)}d ago` :
+                                  offer.notStarted ? `Starts in ${offer.daysUntilExpiration}d` :
+                                  `${offer.daysUntilExpiration}d left`}</div>
                         </div>
-                        <div class="offer-details">
-                            <p><strong>Period:</strong> ${offer.startDate.toLocaleDateString()} - ${offer.endDate.toLocaleDateString()}</p>
-                            ${offer.expired ? `<p style="color: #dc3545;"><strong>Expired ${Math.abs(offer.daysUntilExpiration)} days ago</strong></p>` :
-                              offer.notStarted ? `<p style="color: #17a2b8;"><strong>Starts in ${offer.daysUntilExpiration} days</strong></p>` :
-                              `<p><strong>Days remaining:</strong> ${offer.daysUntilExpiration}</p>`}
-                            <p>${offer.description}</p>
-                        </div>
+                        <div style="font-size: 0.9em; color: #666; margin-bottom: 0.5rem;">${offer.description}</div>
                         ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
-                        <div class="progress-text">
-                            <strong>Earned:</strong> $${earned.toFixed(2)}
-                        </div>
                         ${transactionsHtml}
                     </div>
                 `;
@@ -1001,25 +970,21 @@ class OfferTracker {
         const transactionHtml = await Promise.all(transactions.slice(0, 10).map(async transaction => {
             const matchingOffers = await this.dataManager.getMatchingOffersForTransaction(transaction);
             const matchingOffersHtml = matchingOffers.length > 0
-                ? `<div style="font-size: 0.8rem; color: #28a745; margin-top: 0.25rem;">Matches: ${matchingOffers.map(o => o.name).join(', ')}</div>`
+                ? matchingOffers.map(o => `<div style="font-size: 0.8rem; color: #28a745; margin-left: 1rem; padding: 0.15rem 0;">↳ ${o.name}</div>`).join('')
                 : '';
 
             return `
-                <div class="transaction-item">
-                    <div class="transaction-info">
-                        <div class="transaction-date">${new Date(transaction.date + 'T00:00:00').toLocaleDateString()}</div>
-                        <div class="transaction-merchant">${transaction.merchant}</div>
-                        ${transaction.description ? `<div style="font-size: 0.9rem; color: #666;">${transaction.description}</div>` : ''}
-                        <div class="transaction-category">${(transaction.categories || []).join(', ')}</div>
-                        ${matchingOffersHtml}
-                    </div>
-                    <div style="text-align: right;">
-                        <div class="transaction-amount">$${transaction.amount.toFixed(2)}</div>
-                        <div style="margin-top: 0.5rem;">
-                            <button class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; margin-right: 0.25rem;" onclick="tracker.editTransaction(${transaction.id})">Edit</button>
-                            <button class="btn-danger" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;" onclick="tracker.deleteTransaction(${transaction.id})">Delete</button>
+                <div class="transaction-item" style="padding: 0.5rem 1rem; margin-bottom: 0.25rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="flex: 1; font-size: 0.9rem;">
+                            ${new Date(transaction.date + 'T00:00:00').toLocaleDateString()} • <strong>${transaction.merchant}</strong> • $${transaction.amount.toFixed(2)}${(transaction.categories || []).length > 0 ? ` • ${transaction.categories.join(', ')}` : ''}
+                        </div>
+                        <div style="white-space: nowrap; margin-left: 1rem;">
+                            <button class="btn-secondary" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; margin-right: 0.25rem;" onclick="tracker.editTransaction(${transaction.id})">Edit</button>
+                            <button class="btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.75rem;" onclick="tracker.deleteTransaction(${transaction.id})">Delete</button>
                         </div>
                     </div>
+                    ${matchingOffersHtml}
                 </div>
             `;
         }));
