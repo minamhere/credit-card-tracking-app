@@ -730,6 +730,27 @@ button:hover {
     margin: 0.25rem 0;
 }
 
+.offer-completion {
+    margin-bottom: 0.75rem;
+    color: #155724;
+}
+
+.month-entry {
+    margin-left: 1rem;
+    margin-top: 0.25rem;
+}
+
+.transaction-breakdown {
+    font-size: 0.85rem;
+    color: #666;
+    margin-left: 1.5rem;
+    margin-top: 0.25rem;
+}
+
+.transaction-breakdown div {
+    margin: 0.1rem 0;
+}
+
 .remaining-item {
     color: #856404;
     margin: 0.25rem 0;
