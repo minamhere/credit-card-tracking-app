@@ -99,20 +99,26 @@
             <div id="transactions" class="tab-content">
                 <h2>Add Transaction</h2>
                 <form id="transaction-form">
-                    <div class="form-group">
-                        <label for="transaction-date">Date:</label>
-                        <input type="date" id="transaction-date" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="transaction-amount">Amount ($):</label>
-                        <input type="number" id="transaction-amount" step="0.01" min="0" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="transaction-merchant">Merchant:</label>
-                        <div class="autocomplete-container">
-                            <input type="text" id="transaction-merchant" required autocomplete="off">
-                            <div id="merchant-suggestions" class="autocomplete-suggestions"></div>
+                    <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                            <label for="transaction-date">Date:</label>
+                            <input type="date" id="transaction-date" required>
                         </div>
+                        <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                            <label for="transaction-amount">Amount ($):</label>
+                            <input type="number" id="transaction-amount" step="0.01" min="0" required>
+                        </div>
+                        <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                            <label for="transaction-merchant-select">Merchant:</label>
+                            <select id="transaction-merchant-select" required>
+                                <option value="">Select merchant...</option>
+                                <option value="__ADD_NEW__">+ Add New Merchant</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="new-merchant-container" class="form-group" style="display: none;">
+                        <label for="transaction-merchant-new">New Merchant Name:</label>
+                        <input type="text" id="transaction-merchant-new" placeholder="Enter new merchant name">
                     </div>
                     <div class="form-group">
                         <label>Categories (select all that apply):</label>
