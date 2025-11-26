@@ -135,8 +135,8 @@ class DataManager {
             const endOfLastMonth = new Date(endDate.getFullYear(), endDate.getMonth() + 1, 0);
 
             while (currentDate <= endOfLastMonth) {
-                const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-                const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+                const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1, 0, 0, 0);
+                const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
 
                 const monthTransactions = eligibleTransactions.filter(t => {
                     // Parse transaction date as local time
@@ -633,13 +633,16 @@ class DataManager {
                     const year = monthParts[1] ? parseInt(monthParts[1]) : new Date().getFullYear();
 
                     const monthDate = new Date(`${monthName} 1, ${year}`);
-                    const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
-                    const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
+                    const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1, 0, 0, 0);
+                    const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
 
+                    // Ensure periodStart and periodEnd are Date objects
+                    const periodStartDate = periodStart instanceof Date ? periodStart : new Date(periodStart);
+                    const periodEndDate = periodEnd instanceof Date ? periodEnd : new Date(periodEnd);
 
                     // Check if this month overlaps with our period and is not completed
-                    const overlapStart = new Date(Math.max(monthStart, periodStart));
-                    const overlapEnd = new Date(Math.min(monthEnd, periodEnd));
+                    const overlapStart = new Date(Math.max(monthStart.getTime(), periodStartDate.getTime()));
+                    const overlapEnd = new Date(Math.min(monthEnd.getTime(), periodEndDate.getTime()));
 
                     if (overlapStart <= overlapEnd && !month.completed) {
                         // This month is relevant and not completed
@@ -717,13 +720,16 @@ class DataManager {
                     const year = monthParts[1] ? parseInt(monthParts[1]) : new Date().getFullYear();
 
                     const monthDate = new Date(`${monthName} 1, ${year}`);
-                    const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
-                    const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
+                    const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1, 0, 0, 0);
+                    const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
 
+                    // Ensure periodStart and periodEnd are Date objects
+                    const periodStartDate = periodStart instanceof Date ? periodStart : new Date(periodStart);
+                    const periodEndDate = periodEnd instanceof Date ? periodEnd : new Date(periodEnd);
 
                     // Check if this month overlaps with our period and is not completed
-                    const overlapStart = new Date(Math.max(monthStart, periodStart));
-                    const overlapEnd = new Date(Math.min(monthEnd, periodEnd));
+                    const overlapStart = new Date(Math.max(monthStart.getTime(), periodStartDate.getTime()));
+                    const overlapEnd = new Date(Math.min(monthEnd.getTime(), periodEndDate.getTime()));
 
                     if (overlapStart <= overlapEnd && !month.completed) {
                         // This month is relevant and not completed
@@ -929,11 +935,11 @@ class DataManager {
             const endDateCopy = new Date(endDate);
 
             while (currentDate <= endDateCopy) {
-                const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-                const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+                const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1, 0, 0, 0);
+                const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
 
-                const effectiveStart = new Date(Math.max(monthStart, startDate));
-                const effectiveEnd = new Date(Math.min(monthEnd, endDate));
+                const effectiveStart = new Date(Math.max(monthStart.getTime(), startDate.getTime()));
+                const effectiveEnd = new Date(Math.min(monthEnd.getTime(), endDate.getTime()));
 
                 if (effectiveStart <= effectiveEnd) {
                     const daysInPeriod = Math.ceil((effectiveEnd - effectiveStart) / (1000 * 60 * 60 * 24)) + 1;
@@ -1258,9 +1264,12 @@ class DataManager {
 
                 // Determine phase completion and expiration
                 const phaseComplete = overlapNeeds.every(need => !need.needed);
+                const startDate = new Date(overlap.startDate);
                 const endDate = new Date(overlap.endDate);
+                const notStarted = startDate > today;
                 const expired = endDate < today;
                 const daysUntilExpiration = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+                const daysUntilStart = Math.ceil((startDate - today) / (1000 * 60 * 60 * 24));
 
                 // Check if current month is complete for monthly offers
                 const hasCurrentMonthComplete = overlap.offers.some(offer => {
@@ -1284,8 +1293,10 @@ class DataManager {
                     optimalPattern,
                     completionDescriptions,
                     complete: phaseComplete,
+                    notStarted,
                     expired,
                     daysUntilExpiration,
+                    daysUntilStart,
                     hasCurrentMonthComplete
                 });
             }
@@ -1326,11 +1337,12 @@ class DataManager {
                 const completionDescriptions = phase.completionDescriptions;
 
             // Build the complete action phase HTML
-            const headerIcon = phase.complete ? '✅' : (phase.expired ? '⏰' : '🚀');
-            const headerText = phase.complete ? 'COMPLETED' : (phase.expired ? 'EXPIRED' : 'ACTION REQUIRED');
+            const headerIcon = phase.complete ? '✅' : (phase.expired ? '⏰' : (phase.notStarted ? '📅' : '🚀'));
+            const headerText = phase.complete ? 'COMPLETED' : (phase.expired ? 'EXPIRED' : (phase.notStarted ? 'UPCOMING' : 'ACTION REQUIRED'));
             const daysText = phase.expired ? `(Expired ${Math.abs(phase.daysUntilExpiration)} days ago)` :
+                             (phase.notStarted ? `(Starts in ${phase.daysUntilStart} days)` :
                              (phase.daysUntilExpiration < 7 ? `(⚡ ${phase.daysUntilExpiration} days left!)` :
-                              `(${phase.daysUntilExpiration} days left)`);
+                              `(${phase.daysUntilExpiration} days left)`));
 
             let actionPhaseHtml = `
                 <div class="action-phase ${phase.complete ? 'phase-complete' : ''} ${phase.expired ? 'phase-expired' : ''}">
@@ -1573,19 +1585,24 @@ class DataManager {
                             }
                         }
 
-                        if (monthOverlapsWithPeriod && !month.completed) {
+                        if (monthOverlapsWithPeriod) {
                             // Get transactions for this month
                             const monthStart = new Date(month.month + ' 1');
                             const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59);
                             const matchingTransactions = await this.getMatchingTransactionsForOffer(offer, transactions, monthStart, monthEnd);
 
                             let monthEntry = `${monthName}`;
+                            if (month.completed) {
+                                monthEntry += ` ✅`;
+                            }
                             if (matchingTransactions.length > 0) {
                                 monthEntry += `<div class="transaction-breakdown">`;
                                 matchingTransactions.forEach(t => {
                                     monthEntry += `<div>• $${t.amount.toFixed(2)} at ${t.merchant} (${new Date(t.date).toLocaleDateString()})</div>`;
                                 });
                                 monthEntry += `</div>`;
+                            } else if (!month.completed) {
+                                monthEntry += `<div class="transaction-breakdown"><em>No transactions yet</em></div>`;
                             }
 
                             completedMonths.push(monthEntry);
