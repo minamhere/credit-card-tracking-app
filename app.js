@@ -850,7 +850,12 @@ class OfferTracker {
                                 </div>
                             </div>
                             <div style="text-align: right; margin-left: 1rem;">
-                                <div style="font-size: 1.1em; font-weight: bold; white-space: nowrap;">$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}</div>
+                                <div style="font-size: 1.1em; font-weight: bold; white-space: nowrap;">
+                                    ${offer.monthlyTracking && progress.months ?
+                                        `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
+                                        `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`
+                                    }
+                                </div>
                                 <div style="font-size: 0.8em; color: #666;">Earned: $${earned.toFixed(2)}</div>
                             </div>
                         </div>
@@ -901,41 +906,65 @@ class OfferTracker {
     }
 
     renderMonthlyProgress(offer, progress) {
+        const today = new Date();
+
         const monthsHtml = progress.months.map(month => {
             let progressBar = '';
             let progressText = '';
+            let percentage = 0;
+
+            // Parse the month to check if it's expired
+            const monthParts = month.month.split(' ');
+            const monthName = monthParts[0];
+            const year = monthParts[1] ? parseInt(monthParts[1]) : today.getFullYear();
+            const monthDate = new Date(`${monthName} 1, ${year}`);
+            const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
+            const isExpired = monthEnd < today && !month.completed;
 
             if (offer.type === 'spending' && offer.spendingTarget) {
-                const percentage = Math.min((month.spending / offer.spendingTarget) * 100, 100);
-                progressBar = `<div class="progress-bar" style="width: ${percentage}%"></div>`;
-                progressText = `$${month.spending.toFixed(2)} / $${offer.spendingTarget}`;
+                percentage = Math.min((month.spending / offer.spendingTarget) * 100, 100);
+                progressBar = `<div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>`;
+                progressText = `$${month.spending.toFixed(0)}/$${offer.spendingTarget}`;
             } else if (offer.type === 'transactions' && offer.transactionTarget) {
-                const percentage = Math.min((month.transactionCount / offer.transactionTarget) * 100, 100);
-                progressBar = `<div class="progress-bar" style="width: ${percentage}%"></div>`;
-                progressText = `${month.transactionCount} / ${offer.transactionTarget} transactions`;
+                percentage = Math.min((month.transactionCount / offer.transactionTarget) * 100, 100);
+                progressBar = `<div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>`;
+                progressText = `${month.transactionCount}/${offer.transactionTarget}`;
+            }
+
+            // Determine status
+            let statusClass = 'status-active';
+            let statusText = 'IN PROGRESS';
+            if (month.completed) {
+                statusClass = 'status-completed';
+                statusText = 'COMPLETED';
+            } else if (isExpired) {
+                statusClass = 'status-expired';
+                statusText = 'EXPIRED';
             }
 
             return `
-                <div style="margin-bottom: 1rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                        <strong>${month.month}</strong>
-                        <span class="status-badge ${month.completed ? 'status-completed' : 'status-active'}">
-                            ${month.completed ? 'COMPLETED' : 'IN PROGRESS'}
-                        </span>
+                <div style="flex: 1; min-width: 120px; padding: 0.5rem; border: 1px solid #dee2e6; border-radius: 5px; margin-right: 0.5rem; background: ${month.completed ? '#d4edda' : isExpired ? '#f8d7da' : '#fff'};">
+                    <div style="font-size: 0.8em; font-weight: bold; margin-bottom: 0.25rem;">${monthName}</div>
+                    <div style="margin-bottom: 0.25rem;">
+                        <div class="offer-progress" style="height: 4px; background: #e9ecef;">
+                            ${progressBar}
+                        </div>
                     </div>
-                    <div class="offer-progress">
-                        ${progressBar}
+                    <div style="font-size: 0.75em; color: #666; margin-bottom: 0.25rem;">${progressText}</div>
+                    <div style="font-size: 0.7em;">
+                        <span class="${statusClass}" style="padding: 0.1rem 0.3rem; font-size: 0.7em;">${statusText}</span>
                     </div>
-                    <div class="progress-text">${progressText}</div>
                 </div>
             `;
         }).join('');
 
         return `
-            <div>
-                ${monthsHtml}
-                <div class="progress-text">
-                    <strong>Completed Months:</strong> ${progress.totalCompleted} / ${progress.months.length}
+            <div style="margin-top: 0.5rem;">
+                <div style="display: flex; overflow-x: auto; margin-bottom: 0.5rem;">
+                    ${monthsHtml}
+                </div>
+                <div style="font-size: 0.85em; color: #666;">
+                    <strong>Completed:</strong> ${progress.totalCompleted} / ${progress.months.length} months
                 </div>
             </div>
         `;
