@@ -879,14 +879,17 @@ class OfferTracker {
             let recommendationsHtml = '';
             if (masterStrategy) {
                 recommendationsHtml = `
-                    <div style="margin-top: 2rem;">
+                    <div style="margin-top: 1rem;">
                         <h2 style="color: #155724; margin-bottom: 1rem;">📋 Action Plan</h2>
                         ${this.renderMasterStrategy(masterStrategy)}
                     </div>
                 `;
             }
 
-            container.innerHTML = summary + offerCards.join('') + recommendationsHtml;
+            // Show action plan first, then progress bars
+            container.innerHTML = summary + recommendationsHtml +
+                `<div style="margin-top: 2rem;"><h2 style="color: #155724; margin-bottom: 1rem;">📊 Offer Progress</h2></div>` +
+                offerCards.join('');
 
         } catch (error) {
             console.error('Error rendering dashboard:', error);
