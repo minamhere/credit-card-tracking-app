@@ -68,8 +68,6 @@ class OfferTracker {
         try {
             console.log('Loading people...');
             await this.loadPeople();
-            console.log('Rendering recommendations...');
-            await this.renderRecommendations();
             console.log('Rendering dashboard...');
             await this.renderDashboard();
             console.log('Rendering transactions...');
@@ -119,7 +117,6 @@ class OfferTracker {
         this.dataManager.dbManager.setCurrentPerson(personId);
 
         // Reload all data
-        await this.renderRecommendations();
         await this.renderDashboard();
         await this.renderTransactions();
         await this.renderOffers();
@@ -181,7 +178,6 @@ class OfferTracker {
             await this.loadPeople();
 
             // Refresh views
-            await this.renderRecommendations();
             await this.renderDashboard();
             await this.renderTransactions();
             await this.renderOffers();
@@ -558,7 +554,6 @@ class OfferTracker {
         document.getElementById('transaction-date').valueAsDate = new Date();
 
         // Update all views
-        await this.renderRecommendations();
         await this.renderTransactions();
         await this.renderDashboard();
 
@@ -576,7 +571,6 @@ class OfferTracker {
     async deleteTransaction(id) {
         if (confirm('Are you sure you want to delete this transaction?')) {
             await this.dataManager.deleteTransaction(id);
-            await this.renderRecommendations();
             await this.renderTransactions();
             await this.renderDashboard();
         }
@@ -664,7 +658,6 @@ class OfferTracker {
         await this.dataManager.updateTransaction(this.currentEditingTransactionId, transactionData);
 
         this.hideTransactionEditModal();
-        await this.renderRecommendations();
         await this.renderTransactions();
         await this.renderDashboard();
     }
@@ -783,7 +776,6 @@ class OfferTracker {
         }
 
         this.hideOfferForm();
-        await this.renderRecommendations();
         await this.renderOffers();
         await this.renderDashboard();
         await this.renderTransactions();
@@ -792,7 +784,6 @@ class OfferTracker {
     async deleteOffer(id) {
         if (confirm('Are you sure you want to delete this offer?')) {
             await this.dataManager.deleteOffer(id);
-            await this.renderRecommendations();
             await this.renderOffers();
             await this.renderDashboard();
             await this.renderTransactions();
