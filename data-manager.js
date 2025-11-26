@@ -1243,37 +1243,98 @@ class DataManager {
                 return ['Error: Unable to generate strategy - missing optimization data.'];
             }
 
-            // Start with total potential reward
-            const totalReward = allOffers.reduce((sum, offer) => {
-                let reward = offer.reward || 0;
-                if (offer.bonusReward) reward += offer.bonusReward;
-                if (offer.monthlyTracking && offer.progress && offer.progress.months) {
-                    const incompleteMonths = offer.progress.months.filter(m => !m.completed).length;
-                    reward = (offer.reward || 0) * incompleteMonths + (offer.bonusReward || 0);
+            // Collect all phases with metadata for sorting
+            const phases = [];
+
+            // Process each selected overlap as a phase
+            for (const overlap of optimalCombination.selectedOverlaps) {
+                const overlapNeeds = await Promise.all(
+                    overlap.offers.map(offer => this.calculateRemainingNeedsWithProgress(offer, offer.progress, overlap.startDate, overlap.endDate))
+                );
+
+                const periodAnalysis = this.analyzePeriodStructure(overlap.offers, overlap.startDate, overlap.endDate);
+                const optimalPattern = this.calculateOptimalTransactionPattern(overlap.offers, overlapNeeds, overlap.compatibility, periodAnalysis);
+                const completionDescriptions = await this.generateCompletionDescriptions(overlap.offers, overlap.startDate, overlap.endDate);
+
+                // Determine phase completion and expiration
+                const phaseComplete = overlapNeeds.every(need => !need.needed);
+                const endDate = new Date(overlap.endDate);
+                const expired = endDate < today;
+                const daysUntilExpiration = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+
+                // Check if current month is complete for monthly offers
+                const hasCurrentMonthComplete = overlap.offers.some(offer => {
+                    if (offer.monthlyTracking && offer.progress && offer.progress.months) {
+                        const currentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+                        const currentMonthData = offer.progress.months.find(m => {
+                            if (!m.month) return false;
+                            const monthDate = new Date(m.month + ' 1');
+                            return monthDate.getFullYear() === currentMonth.getFullYear() &&
+                                   monthDate.getMonth() === currentMonth.getMonth();
+                        });
+                        return currentMonthData && currentMonthData.completed;
+                    }
+                    return false;
+                });
+
+                phases.push({
+                    overlap,
+                    overlapNeeds,
+                    periodAnalysis,
+                    optimalPattern,
+                    completionDescriptions,
+                    complete: phaseComplete,
+                    expired,
+                    daysUntilExpiration,
+                    hasCurrentMonthComplete
+                });
+            }
+
+            // Sort phases by priority
+            phases.sort((a, b) => {
+                const getPriority = (phase) => {
+                    // If current month complete but future months remain, lower priority
+                    if (phase.hasCurrentMonthComplete && !phase.complete) return 3.5;
+
+                    // Priority levels
+                    if (!phase.expired && !phase.complete) return 1; // Urgent - incomplete, not expired
+                    if (!phase.expired && phase.complete) return 2;  // Complete, not expired
+                    if (phase.expired && phase.complete) return 5;   // Complete, expired
+                    if (phase.expired && !phase.complete) return 6;  // Incomplete, expired (missed)
+
+                    return 4; // Default
+                };
+
+                const aPriority = getPriority(a);
+                const bPriority = getPriority(b);
+
+                if (aPriority !== bPriority) {
+                    return aPriority - bPriority;
                 }
-                return sum + reward;
-            }, 0);
 
-        // Start directly with the action phases (total earnings already shown in gold badge)
+                // Within same priority, sort by expiration (soonest first)
+                return a.daysUntilExpiration - b.daysUntilExpiration;
+            });
 
-        // Process each selected overlap as a phase
-        let phaseNumber = 1;
-        for (const overlap of optimalCombination.selectedOverlaps) {
-            const overlapNeeds = await Promise.all(
-                overlap.offers.map(offer => this.calculateRemainingNeedsWithProgress(offer, offer.progress, overlap.startDate, overlap.endDate))
-            );
-
-            // Create clear action-oriented formatting
-            const periodAnalysis = this.analyzePeriodStructure(overlap.offers, overlap.startDate, overlap.endDate);
-            const optimalPattern = this.calculateOptimalTransactionPattern(overlap.offers, overlapNeeds, overlap.compatibility, periodAnalysis);
-
-            // Generate accurate completion descriptions
-            const completionDescriptions = await this.generateCompletionDescriptions(overlap.offers, overlap.startDate, overlap.endDate);
+            // Now generate HTML for sorted phases
+            let phaseNumber = 1;
+            for (const phase of phases) {
+                const overlap = phase.overlap;
+                const overlapNeeds = phase.overlapNeeds;
+                const periodAnalysis = phase.periodAnalysis;
+                const optimalPattern = phase.optimalPattern;
+                const completionDescriptions = phase.completionDescriptions;
 
             // Build the complete action phase HTML
+            const headerIcon = phase.complete ? '✅' : (phase.expired ? '⏰' : '🚀');
+            const headerText = phase.complete ? 'COMPLETED' : (phase.expired ? 'EXPIRED' : 'ACTION REQUIRED');
+            const daysText = phase.expired ? `(Expired ${Math.abs(phase.daysUntilExpiration)} days ago)` :
+                             (phase.daysUntilExpiration < 7 ? `(⚡ ${phase.daysUntilExpiration} days left!)` :
+                              `(${phase.daysUntilExpiration} days left)`);
+
             let actionPhaseHtml = `
-                <div class="action-phase">
-                    <h2 class="phase-header">🚀 <strong>ACTION REQUIRED</strong> - Phase ${phaseNumber}</h2>
+                <div class="action-phase ${phase.complete ? 'phase-complete' : ''} ${phase.expired ? 'phase-expired' : ''}">
+                    <h2 class="phase-header">${headerIcon} <strong>${headerText}</strong> - Phase ${phaseNumber} ${daysText}</h2>
 
                     <div class="what-to-do">
                         <h3 class="section-title">📋 <strong>WHAT TO DO:</strong></h3>
