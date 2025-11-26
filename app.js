@@ -801,88 +801,32 @@ class OfferTracker {
 
     async renderDashboard() {
         const container = document.getElementById('offer-progress');
-        const offers = await this.dataManager.getOffers();
-        console.log('Dashboard: Found', offers.length, 'offers:', offers);
 
-        let totalEarned = 0;
-        let totalPotential = 0;
-        let activeOffers = 0;
+        try {
+            // Get master strategy with recommendations
+            const { masterStrategy } = await this.dataManager.getOptimalSpendingRecommendations();
 
-        const offerCards = await Promise.all(offers.map(async offer => {
-            const progress = await this.dataManager.calculateOfferProgress(offer);
-
-            if (progress.status === 'active') {
-                activeOffers++;
+            if (!masterStrategy) {
+                container.innerHTML = `
+                    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 10px; text-align: center; color: #666;">
+                        <p>🎉 All offers completed!</p>
+                        <p>No active offers requiring attention.</p>
+                    </div>
+                `;
+                return;
             }
 
-            // Calculate potential earnings
-            if (offer.tiers && offer.tiers.length > 0) {
-                // For tiered offers, use highest tier
-                const highestTier = [...offer.tiers].sort((a, b) => b.reward - a.reward)[0];
-                if (offer.monthlyTracking) {
-                    const monthCount = progress.months ? progress.months.length : 1;
-                    totalPotential += highestTier.reward * monthCount;
-                } else {
-                    totalPotential += highestTier.reward;
-                }
-            } else {
-                totalPotential += offer.reward;
-                if (offer.bonusReward) {
-                    totalPotential += offer.bonusReward;
-                }
-            }
+            // Render master strategy (combines dashboard and recommendations)
+            container.innerHTML = this.renderMasterStrategy(masterStrategy);
 
-            // Calculate earned amount
-            let earned = 0;
-            if (offer.monthlyTracking && progress.months) {
-                // Sum up earned rewards from each month
-                earned = progress.months.reduce((sum, month) => sum + (month.earnedReward || 0), 0);
-                if (offer.bonusReward && progress.totalCompleted === progress.months.length) {
-                    earned += offer.bonusReward;
-                }
-            } else if (progress.earnedReward) {
-                earned = progress.earnedReward;
-            }
-            totalEarned += earned;
-
-            return `
-                <div class="offer-card">
-                    <div class="offer-header">
-                        <div class="offer-name">${offer.name}</div>
-                        <div class="offer-reward">$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward} bonus` : ''}</div>
-                    </div>
-                    <div class="offer-details">
-                        <div class="status-badge status-${progress.status}">${progress.status.toUpperCase()}</div>
-                        <div class="offer-type-badge">${this.getOfferTypeLabel(offer)}</div>
-                        <p><strong>Period:</strong> ${new Date(offer.startDate + 'T00:00:00').toLocaleDateString()} - ${new Date(offer.endDate + 'T00:00:00').toLocaleDateString()}</p>
-                        <p>${offer.description}</p>
-                    </div>
-                    ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
-                    <div class="progress-text">
-                        <strong>Earned:</strong> $${earned.toFixed(2)}
-                    </div>
+        } catch (error) {
+            console.error('Error rendering dashboard:', error);
+            container.innerHTML = `
+                <div style="background: #f8d7da; padding: 1rem; border-radius: 5px; color: #721c24;">
+                    Error loading dashboard. Please try again.
                 </div>
             `;
-        }));
-
-        const summary = `
-            <div class="dashboard-summary">
-                <div class="summary-card">
-                    <div class="summary-value">$${totalEarned.toFixed(2)}</div>
-                    <div class="summary-label">Total Earned</div>
-                </div>
-                <div class="summary-card">
-                    <div class="summary-value">$${totalPotential.toFixed(2)}</div>
-                    <div class="summary-label">Total Potential</div>
-                </div>
-                <div class="summary-card">
-                    <div class="summary-value">${activeOffers}</div>
-                    <div class="summary-label">Active Offers</div>
-                </div>
-            </div>
-        `;
-
-        container.innerHTML = summary + offerCards.join('');
+        }
     }
 
     renderMonthlyProgress(offer, progress) {
