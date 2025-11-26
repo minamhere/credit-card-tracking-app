@@ -999,7 +999,7 @@ class OfferTracker {
         const transactionHtml = await Promise.all(transactions.slice(0, 10).map(async transaction => {
             const matchingOffers = await this.dataManager.getMatchingOffersForTransaction(transaction);
             const matchingOffersHtml = matchingOffers.length > 0
-                ? matchingOffers.map(o => `<div style="font-size: 0.8rem; color: #28a745; margin-left: 1rem; padding: 0.15rem 0;">↳ ${o.name}</div>`).join('')
+                ? `<div style="margin-top: 0.25rem;">${matchingOffers.map(o => `<div style="font-size: 0.8rem; color: #28a745; margin-left: 1rem; padding: 0.15rem 0;">↳ ${o.name}</div>`).join('')}</div>`
                 : '';
 
             return `
@@ -1037,7 +1037,12 @@ class OfferTracker {
                 <div class="offer-card">
                     <div class="offer-header">
                         <div class="offer-name">${offer.name}</div>
-                        <div class="offer-reward">$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward} bonus` : ''}</div>
+                        <div class="offer-reward">
+                            ${offer.monthlyTracking && progress.months ?
+                                `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
+                                `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`
+                            }
+                        </div>
                     </div>
                     <div class="offer-details">
                         <div class="status-badge status-${progress.status}">${progress.status.toUpperCase()}</div>
