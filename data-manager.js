@@ -429,21 +429,17 @@ class DataManager {
         const offersWithCategories = offers.filter(offer => offer.categories && offer.categories.length > 0);
 
         if (offersWithCategories.length === 0) {
-            // No category requirements - all categories work
+            // No category requirements - all offers accept any category
             compatibility.categories = [];
             compatibility.reasons.push('Any category accepted by all offers');
-        } else if (offersWithCategories.length < offers.length) {
-            // Some offers have categories, some don't
-            // The ones without categories accept any category, so we can use any of the specified categories
-            const allCategories = new Set();
-            offersWithCategories.forEach(offer => {
-                offer.categories.forEach(cat => allCategories.add(cat));
-            });
-            compatibility.categories = Array.from(allCategories);
+        } else if (offersWithCategories.length === 1) {
+            // Only one offer has categories, others are general
+            // General offers accept any category, so use the categories from the specific offer
+            compatibility.categories = [...offersWithCategories[0].categories];
             compatibility.reasons.push(`Accepted categories: ${compatibility.categories.join(', ')}`);
         } else {
-            // All offers have category requirements - find INTERSECTION
-            // Only categories that appear in ALL offers will work
+            // Multiple offers have category requirements - find INTERSECTION
+            // General offers (no categories) will work with whatever intersection we find
             let intersection = new Set(offersWithCategories[0].categories);
 
             for (let i = 1; i < offersWithCategories.length; i++) {
@@ -454,7 +450,7 @@ class DataManager {
             compatibility.categories = Array.from(intersection);
 
             if (compatibility.categories.length === 0) {
-                // No common categories - offers CANNOT overlap
+                // No common categories between category-specific offers - they CANNOT overlap
                 compatibility.isCompatible = false;
                 return null;
             }
