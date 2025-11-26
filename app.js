@@ -838,25 +838,25 @@ class OfferTracker {
 
                 return `
                     <div class="offer-card">
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
-                            <div style="flex: 1;">
-                                <div class="offer-name" style="margin-bottom: 0.25rem;">${offer.name}</div>
-                                <div style="margin: 0.25rem 0;">
-                                    <span style="background: ${tierBadge.color}; color: white; padding: 0.2rem 0.5rem; border-radius: 3px; font-weight: bold; font-size: 0.75em;">
-                                        ${tierBadge.text}
-                                    </span>
-                                    <span class="status-badge status-${progress.status}" style="margin-left: 0.5rem; font-size: 0.75em; padding: 0.2rem 0.5rem;">${progress.status.toUpperCase()}</span>
-                                    <span class="offer-type-badge" style="margin-left: 0.5rem; font-size: 0.75em; padding: 0.2rem 0.5rem;">${this.getOfferTypeLabel(offer)}</span>
+                        <div style="margin-bottom: 0.5rem;">
+                            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; margin-bottom: 0.25rem;">
+                                <div class="offer-name" style="margin-bottom: 0.25rem; flex: 1 1 100%; min-width: 0;">${offer.name}</div>
+                                <div style="flex: 1 1 auto; text-align: right; margin-left: auto;">
+                                    <div style="font-size: 1.1em; font-weight: bold;">
+                                        ${offer.monthlyTracking && progress.months ?
+                                            `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
+                                            `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`
+                                        }
+                                    </div>
+                                    <div style="font-size: 0.8em; color: #666;">Earned: $${earned.toFixed(2)}</div>
                                 </div>
                             </div>
-                            <div style="text-align: right; margin-left: 1rem;">
-                                <div style="font-size: 1.1em; font-weight: bold; white-space: nowrap;">
-                                    ${offer.monthlyTracking && progress.months ?
-                                        `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
-                                        `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`
-                                    }
-                                </div>
-                                <div style="font-size: 0.8em; color: #666;">Earned: $${earned.toFixed(2)}</div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                                <span style="background: ${tierBadge.color}; color: white; padding: 0.2rem 0.5rem; border-radius: 3px; font-weight: bold; font-size: 0.75em;">
+                                    ${tierBadge.text}
+                                </span>
+                                <span class="status-badge status-${progress.status}" style="font-size: 0.75em; padding: 0.2rem 0.5rem;">${progress.status.toUpperCase()}</span>
+                                <span class="offer-type-badge" style="font-size: 0.75em; padding: 0.2rem 0.5rem;">${this.getOfferTypeLabel(offer)}</span>
                             </div>
                         </div>
                         <div style="display: flex; justify-content: space-between; font-size: 0.85em; color: #666; margin-bottom: 0.5rem;">
@@ -943,7 +943,7 @@ class OfferTracker {
             }
 
             return `
-                <div style="flex: 1; min-width: 120px; padding: 0.5rem; border: 1px solid #dee2e6; border-radius: 5px; margin-right: 0.5rem; background: ${month.completed ? '#d4edda' : isExpired ? '#f8d7da' : '#fff'};">
+                <div style="flex: 0 1 calc(33.333% - 0.5rem); min-width: 120px; max-width: 200px; padding: 0.5rem; border: 1px solid #dee2e6; border-radius: 5px; margin-right: 0.5rem; margin-bottom: 0.5rem; background: ${month.completed ? '#d4edda' : isExpired ? '#f8d7da' : '#fff'};">
                     <div style="font-size: 0.8em; font-weight: bold; margin-bottom: 0.25rem;">${monthName}</div>
                     <div style="margin-bottom: 0.25rem;">
                         <div class="offer-progress" style="height: 4px; background: #e9ecef;">
@@ -960,7 +960,7 @@ class OfferTracker {
 
         return `
             <div style="margin-top: 0.5rem;">
-                <div style="display: flex; overflow-x: auto; margin-bottom: 0.5rem;">
+                <div style="display: flex; flex-wrap: wrap; margin-bottom: 0.5rem;">
                     ${monthsHtml}
                 </div>
                 <div style="font-size: 0.85em; color: #666;">
