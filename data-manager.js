@@ -21,6 +21,23 @@ class DataManager {
         }
     }
 
+    // Helper to parse date string as local calendar date at noon (avoids timezone edge cases)
+    parseLocalDate(dateString) {
+        // Parse YYYY-MM-DD as local date at noon to avoid DST/timezone issues
+        const [year, month, day] = dateString.split('-').map(Number);
+        return new Date(year, month - 1, day, 12, 0, 0);
+    }
+
+    // Helper to check if a date falls within a calendar month (ignoring time)
+    isDateInMonth(dateString, monthStart, monthEnd) {
+        const date = this.parseLocalDate(dateString);
+        // Compare just the calendar dates, not timestamps
+        const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const startOnly = new Date(monthStart.getFullYear(), monthStart.getMonth(), monthStart.getDate());
+        const endOnly = new Date(monthEnd.getFullYear(), monthEnd.getMonth(), monthEnd.getDate());
+        return dateOnly >= startOnly && dateOnly <= endOnly;
+    }
+
     // Offers methods
     async getOffers() {
         await this.ensureInitialized();
@@ -113,9 +130,12 @@ class DataManager {
 
         const transactions = await this.getTransactions();
         let eligibleTransactions = transactions.filter(t => {
-            // Parse transaction date as local time
-            const transactionDate = new Date(t.date + 'T12:00:00');
-            const isInDateRange = transactionDate >= startDate && transactionDate <= endDate;
+            // Check if transaction falls within offer date range using calendar dates
+            const transactionDate = this.parseLocalDate(t.date);
+            const offerStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+            const offerEnd = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+            const transDate = new Date(transactionDate.getFullYear(), transactionDate.getMonth(), transactionDate.getDate());
+            const isInDateRange = transDate >= offerStart && transDate <= offerEnd;
 
             // Check category match - if offer has categories, transaction must have at least one matching category
             const isCategoryMatch = !offer.categories || offer.categories.length === 0 ||
@@ -139,10 +159,8 @@ class DataManager {
                 const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
 
                 const monthTransactions = eligibleTransactions.filter(t => {
-                    // Parse transaction date as local time
-                    const transactionDate = new Date(t.date + 'T12:00:00');
-                    const inMonth = transactionDate >= monthStart && transactionDate <= monthEnd;
-                    return inMonth;
+                    // Check if transaction date falls within this calendar month
+                    return this.isDateInMonth(t.date, monthStart, monthEnd);
                 });
 
                 const monthSpending = monthTransactions.reduce((sum, t) => sum + t.amount, 0);
