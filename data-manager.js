@@ -328,6 +328,7 @@ class DataManager {
                 // Determine completion status
                 let isComplete = false;
                 let currentMonthComplete = false;
+                let hasActionableMonths = true; // For monthly offers, check if any months can still be worked on
 
                 if (offer.monthlyTracking && progress.months) {
                     isComplete = progress.months.every(month => month.completed);
@@ -341,6 +342,20 @@ class DataManager {
                                monthDate.getMonth() === currentMonth.getMonth();
                     });
                     currentMonthComplete = currentMonthData && currentMonthData.completed;
+
+                    // Check if there are any actionable months (not completed and not expired)
+                    hasActionableMonths = progress.months.some(month => {
+                        if (month.completed) return false; // Already completed
+
+                        // Check if month has expired
+                        const monthParts = month.month.split(' ');
+                        const monthName = monthParts[0];
+                        const year = monthParts[1] ? parseInt(monthParts[1]) : today.getFullYear();
+                        const monthDate = new Date(`${monthName} 1, ${year}`);
+                        const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
+
+                        return monthEnd >= today; // Month is current or future
+                    });
                 } else {
                     isComplete = progress.completed === true;
                 }
@@ -356,6 +371,7 @@ class DataManager {
                     transactions: offerTransactions,
                     isComplete,
                     currentMonthComplete,
+                    hasActionableMonths,
                     expired,
                     notStarted,
                     daysUntilExpiration,
@@ -374,6 +390,11 @@ class DataManager {
                 // Tier 6: Not complete, expired (missed opportunities)
 
                 const getTier = (offer) => {
+                    // For monthly offers with no actionable months, treat as effectively done
+                    if (offer.monthlyTracking && !offer.hasActionableMonths) {
+                        return offer.isComplete ? 5 : 6; // Archived success or missed opportunity
+                    }
+
                     if (!offer.isComplete && !offer.expired && !offer.notStarted && !offer.currentMonthComplete) return 1; // Urgent incomplete
                     if (offer.isComplete && !offer.expired) return 2; // Recently completed
                     if (!offer.isComplete && !offer.expired && !offer.notStarted && offer.currentMonthComplete) return 3; // Current month done
