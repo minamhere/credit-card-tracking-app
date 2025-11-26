@@ -1034,29 +1034,35 @@ class OfferTracker {
             const progress = await this.dataManager.calculateOfferProgress(offer);
 
             return `
-                <div class="offer-card">
-                    <div class="offer-header">
-                        <div class="offer-name">${offer.name}</div>
-                        <div class="offer-reward">
-                            ${offer.monthlyTracking && progress.months ?
-                                `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
-                                `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`
-                            }
+                <div class="offer-card" style="padding: 1rem; margin-bottom: 0.75rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <div style="flex: 1 1 60%; min-width: 200px;">
+                            <div class="offer-name" style="margin-bottom: 0.25rem;">${offer.name}</div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.25rem;">
+                                <span class="status-badge status-${progress.status}" style="font-size: 0.75em; padding: 0.2rem 0.5rem;">${progress.status.toUpperCase()}</span>
+                                <span class="offer-type-badge" style="font-size: 0.75em; padding: 0.2rem 0.5rem;">${this.getOfferTypeLabel(offer)}</span>
+                            </div>
+                        </div>
+                        <div style="flex: 0 1 auto; text-align: right; white-space: nowrap;">
+                            <div style="font-size: 1.1em; font-weight: bold;">
+                                ${offer.monthlyTracking && progress.months ?
+                                    `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
+                                    `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`
+                                }
+                            </div>
                         </div>
                     </div>
-                    <div class="offer-details">
-                        <div class="status-badge status-${progress.status}">${progress.status.toUpperCase()}</div>
-                        <div class="offer-type-badge">${this.getOfferTypeLabel(offer)}</div>
-                        <p><strong>Period:</strong> ${new Date(offer.startDate + 'T00:00:00').toLocaleDateString()} - ${new Date(offer.endDate + 'T00:00:00').toLocaleDateString()}</p>
-                        ${offer.spendingTarget ? `<p><strong>Spending Target:</strong> $${offer.spendingTarget}</p>` : ''}
-                        ${offer.transactionTarget ? `<p><strong>Transaction Target:</strong> ${offer.transactionTarget}</p>` : ''}
-                        ${offer.minTransaction ? `<p><strong>Min Transaction:</strong> $${offer.minTransaction}</p>` : ''}
-                        ${offer.categories && offer.categories.length > 0 ? `<p><strong>Categories:</strong> ${offer.categories.join(', ')}</p>` : ''}
-                        <p>${offer.description}</p>
+                    <div style="font-size: 0.85em; color: #666; margin-bottom: 0.5rem;">
+                        ${new Date(offer.startDate + 'T00:00:00').toLocaleDateString()} - ${new Date(offer.endDate + 'T00:00:00').toLocaleDateString()}
+                        ${offer.spendingTarget ? ` • Target: $${offer.spendingTarget}` : ''}
+                        ${offer.transactionTarget ? ` • ${offer.transactionTarget} transactions` : ''}
+                        ${offer.minTransaction ? ` • Min: $${offer.minTransaction}` : ''}
+                        ${offer.categories && offer.categories.length > 0 ? ` • ${offer.categories.join(', ')}` : ''}
                     </div>
-                    <div class="offer-actions">
-                        <button class="btn-secondary" onclick="tracker.editOffer(${offer.id})">Edit</button>
-                        <button class="btn-danger" onclick="tracker.deleteOffer(${offer.id})">Delete</button>
+                    <div style="font-size: 0.9em; color: #666; margin-bottom: 0.5rem;">${offer.description}</div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.85em;" onclick="tracker.editOffer(${offer.id})">Edit</button>
+                        <button class="btn-danger" style="padding: 0.3rem 0.6rem; font-size: 0.85em;" onclick="tracker.deleteOffer(${offer.id})">Delete</button>
                     </div>
                 </div>
             `;

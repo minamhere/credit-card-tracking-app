@@ -149,45 +149,49 @@
                 <div id="offer-form-container" class="hidden">
                     <h3>Add/Edit Offer</h3>
                     <form id="offer-form">
-                        <div class="form-group">
-                            <label for="offer-name">Offer Name:</label>
-                            <input type="text" id="offer-name" required>
+                        <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                                <label for="offer-name">Offer Name:</label>
+                                <input type="text" id="offer-name" required>
+                            </div>
+                            <div class="form-group" style="flex: 0 0 200px; margin-bottom: 0;">
+                                <label for="offer-type">Type:</label>
+                                <select id="offer-type" required>
+                                    <option value="">Select Type</option>
+                                    <option value="spending">Spending Amount</option>
+                                    <option value="transactions">Number of Transactions</option>
+                                    <option value="combo">Combination</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="offer-type">Offer Type:</label>
-                            <select id="offer-type" required>
-                                <option value="">Select Type</option>
-                                <option value="spending">Spending Amount</option>
-                                <option value="transactions">Number of Transactions</option>
-                                <option value="combo">Combination</option>
-                            </select>
-                        </div>
-                        <div class="form-group date-row">
-                            <div class="date-input">
+                        <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
                                 <label for="offer-start-date">Start Date:</label>
                                 <input type="date" id="offer-start-date" required>
                             </div>
-                            <div class="date-input">
+                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
                                 <label for="offer-end-date">End Date:</label>
                                 <input type="date" id="offer-end-date" required>
                             </div>
+                            <div class="form-group" style="flex: 1; display: flex; align-items: flex-end; margin-bottom: 0;">
+                                <label style="margin: 0;">
+                                    <input type="checkbox" id="offer-monthly-tracking"> Monthly Tracking
+                                </label>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="offer-monthly-tracking"> Monthly Tracking (track progress month by month)
-                            </label>
-                        </div>
-                        <div class="form-group">
-                            <label for="offer-spending-target">Spending Target ($):</label>
-                            <input type="number" id="offer-spending-target" step="0.01" min="0">
-                        </div>
-                        <div class="form-group">
-                            <label for="offer-transaction-target">Transaction Count Target:</label>
-                            <input type="number" id="offer-transaction-target" min="0">
-                        </div>
-                        <div class="form-group">
-                            <label for="offer-min-transaction">Minimum Transaction Amount ($):</label>
-                            <input type="number" id="offer-min-transaction" step="0.01" min="0">
+                        <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                <label for="offer-spending-target">Spending ($):</label>
+                                <input type="number" id="offer-spending-target" step="0.01" min="0">
+                            </div>
+                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                <label for="offer-transaction-target">Transactions:</label>
+                                <input type="number" id="offer-transaction-target" min="0">
+                            </div>
+                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                <label for="offer-min-transaction">Min Amount ($):</label>
+                                <input type="number" id="offer-min-transaction" step="0.01" min="0">
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>Required Categories (select any that apply):</label>
@@ -195,28 +199,32 @@
                                 <!-- Dynamic checkboxes will be inserted here -->
                             </div>
                             <div class="custom-category-input">
-                                <input type="text" id="offer-custom-category" placeholder="Add custom category (e.g., 'retail', 'travel')">
+                                <input type="text" id="offer-custom-category" placeholder="Add custom category">
                                 <button type="button" id="offer-add-category-btn" class="small-btn">Add</button>
                             </div>
                             <small style="color: #666;">Leave unchecked to accept any category</small>
                         </div>
-                        <div class="form-group">
-                            <label for="offer-reward">Reward Amount ($):</label>
-                            <input type="number" id="offer-reward" step="0.01" min="0">
-                            <small style="color: #666; display: block; margin-top: 0.25rem;">Base reward (optional if using tiers below)</small>
-                        </div>
-                        <div class="form-group">
-                            <label for="offer-bonus-reward">Bonus Reward ($) (if applicable):</label>
-                            <input type="number" id="offer-bonus-reward" step="0.01" min="0">
+                        <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                <label for="offer-reward">Reward ($):</label>
+                                <input type="number" id="offer-reward" step="0.01" min="0">
+                            </div>
+                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                <label for="offer-bonus-reward">Bonus ($):</label>
+                                <input type="number" id="offer-bonus-reward" step="0.01" min="0">
+                            </div>
+                            <div style="flex: 1; display: flex; align-items: flex-end; font-size: 0.85em; color: #666; padding-bottom: 0.5rem;">
+                                Reward: base/month, Bonus: completion bonus
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="offer-tiers">Tiered Rewards (optional):</label>
-                            <textarea id="offer-tiers" rows="3" placeholder="Enter tiers like: 750:125&#10;1500:200&#10;(threshold:reward, one per line)"></textarea>
-                            <small style="color: #666; display: block; margin-top: 0.25rem;">For multi-tier offers: Enter "spending:reward" per line (e.g., "750:125" then "1500:200")</small>
+                            <textarea id="offer-tiers" rows="2" placeholder="750:125&#10;1500:200"></textarea>
+                            <small style="color: #666;">Enter "spending:reward" per line</small>
                         </div>
                         <div class="form-group">
                             <label for="offer-description">Description:</label>
-                            <textarea id="offer-description" rows="3"></textarea>
+                            <textarea id="offer-description" rows="2"></textarea>
                         </div>
                         <div class="form-buttons">
                             <button type="submit">Save Offer</button>
