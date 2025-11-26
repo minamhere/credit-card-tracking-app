@@ -794,15 +794,15 @@ class OfferTracker {
         const container = document.getElementById('offer-progress');
 
         try {
-            // Get offers for progress bars
-            const offers = await this.dataManager.getOffers();
+            // Get simplified offer list with progress and transactions
+            const offers = await this.dataManager.getSimplifiedOfferList();
 
             let totalEarned = 0;
             let totalPotential = 0;
             let activeOffers = 0;
 
-            const offerCards = await Promise.all(offers.map(async offer => {
-                const progress = await this.dataManager.calculateOfferProgress(offer);
+            const offerCards = offers.map(offer => {
+                const progress = offer.progress;
 
                 if (progress.status === 'active') {
                     activeOffers++;
@@ -836,25 +836,67 @@ class OfferTracker {
                 }
                 totalEarned += earned;
 
+                // Determine tier badge
+                const getTierBadge = (offer) => {
+                    if (!offer.isComplete && !offer.expired && !offer.notStarted && !offer.currentMonthComplete) return { text: '🚨 URGENT', color: '#dc3545' };
+                    if (offer.isComplete && !offer.expired) return { text: '✅ COMPLETED', color: '#28a745' };
+                    if (!offer.isComplete && !offer.expired && !offer.notStarted && offer.currentMonthComplete) return { text: '⏳ LOWER PRIORITY', color: '#17a2b8' };
+                    if (!offer.isComplete && !offer.expired && !offer.notStarted) return { text: '📅 CAN WAIT', color: '#6c757d' };
+                    if (offer.isComplete && offer.expired) return { text: '🏆 ARCHIVED SUCCESS', color: '#6c757d' };
+                    if (!offer.isComplete && offer.expired) return { text: '❌ MISSED', color: '#dc3545' };
+                    if (offer.notStarted) return { text: '⏰ UPCOMING', color: '#17a2b8' };
+                    return { text: 'UNKNOWN', color: '#6c757d' };
+                };
+
+                const tierBadge = getTierBadge(offer);
+
+                // Render transactions
+                const transactionsHtml = offer.transactions.length > 0 ? `
+                    <div style="margin-top: 1rem; padding: 1rem; background: #f8f9fa; border-radius: 5px;">
+                        <strong>Qualifying Transactions (${offer.transactions.length}):</strong>
+                        <div style="margin-top: 0.5rem; max-height: 200px; overflow-y: auto;">
+                            ${offer.transactions.map(t => `
+                                <div style="padding: 0.5rem; margin: 0.25rem 0; background: white; border-radius: 3px; font-size: 0.9em;">
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span>${new Date(t.date).toLocaleDateString()}</span>
+                                        <strong>$${t.amount.toFixed(2)}</strong>
+                                    </div>
+                                    <div style="color: #666;">${t.merchant}</div>
+                                    ${t.categories && t.categories.length > 0 ? `<div style="color: #666; font-size: 0.85em;">${t.categories.join(', ')}</div>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : '<div style="margin-top: 1rem; padding: 1rem; background: #fff3cd; border-radius: 5px; color: #856404;"><em>No qualifying transactions yet</em></div>';
+
                 return `
                     <div class="offer-card">
                         <div class="offer-header">
                             <div class="offer-name">${offer.name}</div>
                             <div class="offer-reward">$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward} bonus` : ''}</div>
                         </div>
+                        <div style="margin: 0.5rem 0;">
+                            <span style="background: ${tierBadge.color}; color: white; padding: 0.25rem 0.75rem; border-radius: 3px; font-weight: bold; font-size: 0.85em;">
+                                ${tierBadge.text}
+                            </span>
+                            <span class="status-badge status-${progress.status}" style="margin-left: 0.5rem;">${progress.status.toUpperCase()}</span>
+                            <span class="offer-type-badge" style="margin-left: 0.5rem;">${this.getOfferTypeLabel(offer)}</span>
+                        </div>
                         <div class="offer-details">
-                            <div class="status-badge status-${progress.status}">${progress.status.toUpperCase()}</div>
-                            <div class="offer-type-badge">${this.getOfferTypeLabel(offer)}</div>
-                            <p><strong>Period:</strong> ${new Date(offer.startDate + 'T00:00:00').toLocaleDateString()} - ${new Date(offer.endDate + 'T00:00:00').toLocaleDateString()}</p>
+                            <p><strong>Period:</strong> ${offer.startDate.toLocaleDateString()} - ${offer.endDate.toLocaleDateString()}</p>
+                            ${offer.expired ? `<p style="color: #dc3545;"><strong>Expired ${Math.abs(offer.daysUntilExpiration)} days ago</strong></p>` :
+                              offer.notStarted ? `<p style="color: #17a2b8;"><strong>Starts in ${offer.daysUntilExpiration} days</strong></p>` :
+                              `<p><strong>Days remaining:</strong> ${offer.daysUntilExpiration}</p>`}
                             <p>${offer.description}</p>
                         </div>
                         ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
                         <div class="progress-text">
                             <strong>Earned:</strong> $${earned.toFixed(2)}
                         </div>
+                        ${transactionsHtml}
                     </div>
                 `;
-            }));
+            });
 
             const summary = `
                 <div class="dashboard-summary">
@@ -871,25 +913,13 @@ class OfferTracker {
                         <div class="summary-label">Active Offers</div>
                     </div>
                 </div>
+                <div style="margin-top: 2rem;">
+                    <h2 style="color: #155724; margin-bottom: 1rem;">📊 Offers (Sorted by Priority)</h2>
+                </div>
             `;
 
-            // Get master strategy for recommendations
-            const { masterStrategy } = await this.dataManager.getOptimalSpendingRecommendations();
-
-            let recommendationsHtml = '';
-            if (masterStrategy) {
-                recommendationsHtml = `
-                    <div style="margin-top: 1rem;">
-                        <h2 style="color: #155724; margin-bottom: 1rem;">📋 Action Plan</h2>
-                        ${this.renderMasterStrategy(masterStrategy)}
-                    </div>
-                `;
-            }
-
-            // Show action plan first, then progress bars
-            container.innerHTML = summary + recommendationsHtml +
-                `<div style="margin-top: 2rem;"><h2 style="color: #155724; margin-bottom: 1rem;">📊 Offer Progress</h2></div>` +
-                offerCards.join('');
+            // Show offers sorted by priority
+            container.innerHTML = summary + offerCards.join('');
 
         } catch (error) {
             console.error('Error rendering dashboard:', error);

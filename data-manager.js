@@ -21,6 +21,23 @@ class DataManager {
         }
     }
 
+    // Helper to parse date string as local calendar date at noon (avoids timezone edge cases)
+    parseLocalDate(dateString) {
+        // Parse YYYY-MM-DD as local date at noon to avoid DST/timezone issues
+        const [year, month, day] = dateString.split('-').map(Number);
+        return new Date(year, month - 1, day, 12, 0, 0);
+    }
+
+    // Helper to check if a date falls within a calendar month (ignoring time)
+    isDateInMonth(dateString, monthStart, monthEnd) {
+        const date = this.parseLocalDate(dateString);
+        // Compare just the calendar dates, not timestamps
+        const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const startOnly = new Date(monthStart.getFullYear(), monthStart.getMonth(), monthStart.getDate());
+        const endOnly = new Date(monthEnd.getFullYear(), monthEnd.getMonth(), monthEnd.getDate());
+        return dateOnly >= startOnly && dateOnly <= endOnly;
+    }
+
     // Offers methods
     async getOffers() {
         await this.ensureInitialized();
@@ -113,9 +130,12 @@ class DataManager {
 
         const transactions = await this.getTransactions();
         let eligibleTransactions = transactions.filter(t => {
-            // Parse transaction date as local time
-            const transactionDate = new Date(t.date + 'T12:00:00');
-            const isInDateRange = transactionDate >= startDate && transactionDate <= endDate;
+            // Check if transaction falls within offer date range using calendar dates
+            const transactionDate = this.parseLocalDate(t.date);
+            const offerStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+            const offerEnd = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+            const transDate = new Date(transactionDate.getFullYear(), transactionDate.getMonth(), transactionDate.getDate());
+            const isInDateRange = transDate >= offerStart && transDate <= offerEnd;
 
             // Check category match - if offer has categories, transaction must have at least one matching category
             const isCategoryMatch = !offer.categories || offer.categories.length === 0 ||
@@ -139,10 +159,8 @@ class DataManager {
                 const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
 
                 const monthTransactions = eligibleTransactions.filter(t => {
-                    // Parse transaction date as local time
-                    const transactionDate = new Date(t.date + 'T12:00:00');
-                    const inMonth = transactionDate >= monthStart && transactionDate <= monthEnd;
-                    return inMonth;
+                    // Check if transaction date falls within this calendar month
+                    return this.isDateInMonth(t.date, monthStart, monthEnd);
                 });
 
                 const monthSpending = monthTransactions.reduce((sum, t) => sum + t.amount, 0);
@@ -273,6 +291,114 @@ class DataManager {
         }
 
         return matchingOffers;
+    }
+
+    // Get all offers with progress and transactions, sorted by priority
+    async getSimplifiedOfferList() {
+        try {
+            await this.ensureInitialized();
+            const offers = await this.getOffers();
+            const transactions = await this.getTransactions();
+            const today = new Date();
+
+            // Calculate progress for all offers
+            const offersWithProgress = [];
+            for (const offer of offers) {
+                const progress = await this.calculateOfferProgress(offer);
+                const startDate = new Date(offer.startDate + 'T00:00:00');
+                const endDate = new Date(offer.endDate + 'T23:59:59');
+
+                // Get transactions that apply to this offer
+                const offerTransactions = transactions.filter(t => {
+                    const transactionDate = this.parseLocalDate(t.date);
+                    const offerStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+                    const offerEnd = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+                    const transDate = new Date(transactionDate.getFullYear(), transactionDate.getMonth(), transactionDate.getDate());
+                    const isInDateRange = transDate >= offerStart && transDate <= offerEnd;
+
+                    const isCategoryMatch = !offer.categories || offer.categories.length === 0 ||
+                        (t.categories && t.categories.some(transactionCat =>
+                            offer.categories.includes(transactionCat)));
+
+                    const isMinAmountMet = !offer.minTransaction || t.amount >= offer.minTransaction;
+
+                    return isInDateRange && isCategoryMatch && isMinAmountMet;
+                });
+
+                // Determine completion status
+                let isComplete = false;
+                let currentMonthComplete = false;
+
+                if (offer.monthlyTracking && progress.months) {
+                    isComplete = progress.months.every(month => month.completed);
+
+                    // Check if current month is complete
+                    const currentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+                    const currentMonthData = progress.months.find(m => {
+                        if (!m.month) return false;
+                        const monthDate = new Date(m.month + ' 1');
+                        return monthDate.getFullYear() === currentMonth.getFullYear() &&
+                               monthDate.getMonth() === currentMonth.getMonth();
+                    });
+                    currentMonthComplete = currentMonthData && currentMonthData.completed;
+                } else {
+                    isComplete = progress.completed === true;
+                }
+
+                // Calculate days until expiration
+                const daysUntilExpiration = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+                const expired = today > endDate;
+                const notStarted = today < startDate;
+
+                offersWithProgress.push({
+                    ...offer,
+                    progress,
+                    transactions: offerTransactions,
+                    isComplete,
+                    currentMonthComplete,
+                    expired,
+                    notStarted,
+                    daysUntilExpiration,
+                    startDate,
+                    endDate
+                });
+            }
+
+            // Sort offers by 6-tier priority system
+            offersWithProgress.sort((a, b) => {
+                // Tier 1: Not complete, expiring soonest (most urgent)
+                // Tier 2: Complete, expiring soonest (recently completed)
+                // Tier 3: Not complete, current month complete (lower priority)
+                // Tier 4: Not complete, expiring later (can wait)
+                // Tier 5: Complete, expired (archived successes)
+                // Tier 6: Not complete, expired (missed opportunities)
+
+                const getTier = (offer) => {
+                    if (!offer.isComplete && !offer.expired && !offer.notStarted && !offer.currentMonthComplete) return 1; // Urgent incomplete
+                    if (offer.isComplete && !offer.expired) return 2; // Recently completed
+                    if (!offer.isComplete && !offer.expired && !offer.notStarted && offer.currentMonthComplete) return 3; // Current month done
+                    if (!offer.isComplete && !offer.expired && !offer.notStarted) return 4; // Can wait
+                    if (offer.isComplete && offer.expired) return 5; // Archived success
+                    if (!offer.isComplete && offer.expired) return 6; // Missed opportunity
+                    if (offer.notStarted) return 7; // Future offers
+                    return 8; // Unknown state
+                };
+
+                const aTier = getTier(a);
+                const bTier = getTier(b);
+
+                if (aTier !== bTier) return aTier - bTier;
+
+                // Within same tier, sort by days until expiration (ascending)
+                return a.daysUntilExpiration - b.daysUntilExpiration;
+            });
+
+            return offersWithProgress;
+
+        } catch (error) {
+            console.error('Error getting simplified offer list:', error);
+            return [];
+        }
     }
 
     // Optimal spending recommendations
