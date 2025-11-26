@@ -1459,77 +1459,133 @@ class DataManager {
     }
 
     async generateCompletionDescriptions(offers, overlapStartDate, overlapEndDate) {
-        const completed = [];
+        const completedByOffer = [];
         const remaining = [];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Reset to start of day for comparison
 
         const overlapStart = new Date(overlapStartDate);
         const overlapEnd = new Date(overlapEndDate);
 
+        // Get all transactions for showing what counts toward each offer
+        const transactions = await this.getTransactions();
+
         for (const offer of offers) {
             if (!offer.monthlyTracking) {
-                // Non-monthly offers are completed entirely if they're part of the overlap
-                completed.push(offer.name);
+                // Non-monthly offers - show transactions that count toward this offer
+                const matchingTransactions = await this.getMatchingTransactionsForOffer(offer, transactions, overlapStart, overlapEnd);
+
+                let offerEntry = `<div class="offer-completion"><strong>${offer.name}</strong>`;
+                if (matchingTransactions.length > 0) {
+                    offerEntry += `<div class="transaction-breakdown">`;
+                    matchingTransactions.forEach(t => {
+                        offerEntry += `<div>• $${t.amount.toFixed(2)} at ${t.merchant} (${new Date(t.date).toLocaleDateString()})</div>`;
+                    });
+                    offerEntry += `</div>`;
+                } else {
+                    offerEntry += `<div class="transaction-breakdown"><em>No transactions yet</em></div>`;
+                }
+                offerEntry += `</div>`;
+
+                completedByOffer.push(offerEntry);
             } else {
-                // For monthly offers, determine which months are covered by this overlap
+                // For monthly offers, show transactions per month
                 const completedMonths = [];
                 const remainingMonths = [];
 
                 if (offer.progress && offer.progress.months) {
                     for (const month of offer.progress.months) {
-                        // Extract month name from the actual data structure
-                        let monthName;
+                        let monthName = month.month ? month.month.replace(' 2025', '') : 'Unknown Month';
 
-                        if (month.month) {
-                            // The data shows months have a "month" field like "October 2025"
-                            // Extract just the month name (remove year for cleaner display)
-                            monthName = month.month.replace(' 2025', '');
-                        } else {
-                            monthName = 'Unknown Month';
-                        }
-
-                        // Check if this month overlaps with the overlap period
+                        // Check if this month overlaps with the overlap period AND is not in the past
                         let monthOverlapsWithPeriod = false;
+                        let monthIsInFuture = false;
 
                         if (month.month) {
-                            // Parse the month string to create date objects for comparison
-                            const monthDate = new Date(month.month + ' 1'); // Add day to make it parseable
+                            const monthDate = new Date(month.month + ' 1');
                             if (!isNaN(monthDate.getTime())) {
-                                // Create start and end of this month
                                 const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
                                 const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
 
                                 monthOverlapsWithPeriod = monthStart <= overlapEnd && monthEnd >= overlapStart;
+                                monthIsInFuture = monthEnd >= today;
                             }
                         }
 
                         if (monthOverlapsWithPeriod && !month.completed) {
-                            completedMonths.push(monthName);
-                        } else if (!month.completed) {
+                            // Get transactions for this month
+                            const monthStart = new Date(month.month + ' 1');
+                            const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59);
+                            const matchingTransactions = await this.getMatchingTransactionsForOffer(offer, transactions, monthStart, monthEnd);
+
+                            let monthEntry = `${monthName}`;
+                            if (matchingTransactions.length > 0) {
+                                monthEntry += `<div class="transaction-breakdown">`;
+                                matchingTransactions.forEach(t => {
+                                    monthEntry += `<div>• $${t.amount.toFixed(2)} at ${t.merchant} (${new Date(t.date).toLocaleDateString()})</div>`;
+                                });
+                                monthEntry += `</div>`;
+                            }
+
+                            completedMonths.push(monthEntry);
+                        } else if (!month.completed && monthIsInFuture) {
+                            // Only add to remaining if the month is in the future (not past)
                             remainingMonths.push(monthName);
                         }
                     }
                 }
 
-                // Build completion descriptions
+                // Build completion descriptions for monthly offers
                 if (completedMonths.length > 0) {
-                    if (completedMonths.length === 1) {
-                        completed.push(`${offer.name} (${completedMonths[0]})`);
-                    } else {
-                        completed.push(`${offer.name} (${completedMonths.join(', ')})`);
-                    }
+                    let offerEntry = `<div class="offer-completion"><strong>${offer.name}</strong>`;
+                    completedMonths.forEach(monthHtml => {
+                        offerEntry += `<div class="month-entry">${monthHtml}</div>`;
+                    });
+                    offerEntry += `</div>`;
+                    completedByOffer.push(offerEntry);
                 }
 
                 if (remainingMonths.length > 0) {
-                    if (remainingMonths.length === 1) {
-                        remaining.push(`${offer.name} (${remainingMonths[0]})`);
-                    } else {
-                        remaining.push(`${offer.name} (${remainingMonths.join(', ')})`);
-                    }
+                    remaining.push(`${offer.name} (${remainingMonths.join(', ')})`);
                 }
             }
         }
 
-        return { completed, remaining };
+        return { completed: completedByOffer, remaining };
+    }
+
+    // Helper method to get matching transactions for an offer within a date range
+    async getMatchingTransactionsForOffer(offer, allTransactions, startDate, endDate) {
+        const matchingTransactions = [];
+
+        for (const transaction of allTransactions) {
+            const transactionDate = new Date(transaction.date + 'T00:00:00');
+
+            // Check if transaction is within date range
+            if (transactionDate < startDate || transactionDate > endDate) {
+                continue;
+            }
+
+            // Check if transaction meets minimum transaction requirement
+            if (offer.minTransaction && transaction.amount < offer.minTransaction) {
+                continue;
+            }
+
+            // Check if transaction matches category requirements
+            if (offer.categories && offer.categories.length > 0) {
+                const transactionCategories = transaction.categories || [];
+                const hasMatchingCategory = offer.categories.some(cat =>
+                    transactionCategories.includes(cat)
+                );
+                if (!hasMatchingCategory) {
+                    continue;
+                }
+            }
+
+            matchingTransactions.push(transaction);
+        }
+
+        return matchingTransactions;
     }
 
     // Utility method to get personal configuration
