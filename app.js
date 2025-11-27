@@ -5,6 +5,8 @@ class OfferTracker {
         this.personalConfig = this.dataManager.getPersonalConfig();
         // Initialize with default categories
         this.availableCategories = this.loadCategories();
+        this.currentTransactionPage = 1;
+        this.transactionsPerPage = 20;
         this.init();
     }
 
@@ -498,6 +500,20 @@ class OfferTracker {
 
                 button.classList.add('active');
                 document.getElementById(targetTab).classList.add('active');
+
+                // Reset merchant dropdown state when switching tabs
+                const newMerchantContainer = document.getElementById('new-merchant-container');
+                const newMerchantInput = document.getElementById('transaction-merchant-new');
+                const merchantSelect = document.getElementById('transaction-merchant-select');
+
+                if (newMerchantContainer && merchantSelect) {
+                    newMerchantContainer.style.display = 'none';
+                    if (newMerchantInput) {
+                        newMerchantInput.required = false;
+                        newMerchantInput.value = '';
+                    }
+                    // Don't reset the dropdown selection itself, just hide the new merchant input
+                }
             });
         });
     }
@@ -954,19 +970,27 @@ class OfferTracker {
                 progressText = `${month.transactionCount}/${offer.transactionTarget}`;
             }
 
-            // Determine status
+            // Determine status and background color
             let statusClass = 'status-active';
             let statusText = 'IN PROGRESS';
+            let bgColor = '#fff';
+
             if (month.completed) {
                 statusClass = 'status-completed';
                 statusText = 'COMPLETED';
+                bgColor = '#d4edda'; // Green
+            } else if (month.partiallyCompleted) {
+                statusClass = 'status-partial';
+                statusText = 'PARTIAL';
+                bgColor = '#fff3cd'; // Yellow
             } else if (isExpired) {
                 statusClass = 'status-expired';
                 statusText = 'EXPIRED';
+                bgColor = '#f8d7da'; // Red
             }
 
             return `
-                <div style="flex: 0 1 calc(33.333% - 0.5rem); min-width: 120px; max-width: 200px; padding: 0.5rem; border: 1px solid #dee2e6; border-radius: 5px; margin-right: 0.5rem; margin-bottom: 0.5rem; background: ${month.completed ? '#d4edda' : isExpired ? '#f8d7da' : '#fff'};">
+                <div style="flex: 0 1 calc(33.333% - 0.5rem); min-width: 120px; max-width: 200px; padding: 0.5rem; border: 1px solid #dee2e6; border-radius: 5px; margin-right: 0.5rem; margin-bottom: 0.5rem; background: ${bgColor};">
                     <div style="font-size: 0.8em; font-weight: bold; margin-bottom: 0.25rem;">${monthName}</div>
                     <div style="margin-bottom: 0.25rem;">
                         <div class="offer-progress" style="height: 4px; background: #e9ecef;">
@@ -1019,7 +1043,13 @@ class OfferTracker {
             return;
         }
 
-        const transactionHtml = await Promise.all(transactions.slice(0, 10).map(async transaction => {
+        // Calculate pagination
+        const totalPages = Math.ceil(transactions.length / this.transactionsPerPage);
+        const startIndex = (this.currentTransactionPage - 1) * this.transactionsPerPage;
+        const endIndex = startIndex + this.transactionsPerPage;
+        const paginatedTransactions = transactions.slice(startIndex, endIndex);
+
+        const transactionHtml = await Promise.all(paginatedTransactions.map(async transaction => {
             const matchingOffers = await this.dataManager.getMatchingOffersForTransaction(transaction);
             const matchingOffersHtml = matchingOffers.length > 0
                 ? `<div style="margin-top: 0.25rem;">${matchingOffers.map(o => `<div style="font-size: 0.8rem; color: #28a745; margin-left: 1rem; padding: 0.15rem 0;">↳ ${o.name}</div>`).join('')}</div>`
@@ -1041,7 +1071,41 @@ class OfferTracker {
             `;
         }));
 
-        container.innerHTML = transactionHtml.join('');
+        // Add pagination controls
+        const paginationHtml = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding: 0.75rem; background: #f8f9fa; border-radius: 5px;">
+                <div style="font-size: 0.9rem;">
+                    Showing ${startIndex + 1}-${Math.min(endIndex, transactions.length)} of ${transactions.length} transactions
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;"
+                        onclick="tracker.goToTransactionPage(${this.currentTransactionPage - 1})"
+                        ${this.currentTransactionPage === 1 ? 'disabled' : ''}>
+                        Previous
+                    </button>
+                    <span style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">
+                        Page ${this.currentTransactionPage} of ${totalPages}
+                    </span>
+                    <button class="btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;"
+                        onclick="tracker.goToTransactionPage(${this.currentTransactionPage + 1})"
+                        ${this.currentTransactionPage === totalPages ? 'disabled' : ''}>
+                        Next
+                    </button>
+                </div>
+            </div>
+        `;
+
+        container.innerHTML = transactionHtml.join('') + paginationHtml;
+    }
+
+    async goToTransactionPage(page) {
+        const transactions = await this.dataManager.getTransactions();
+        const totalPages = Math.ceil(transactions.length / this.transactionsPerPage);
+
+        if (page >= 1 && page <= totalPages) {
+            this.currentTransactionPage = page;
+            await this.renderTransactions();
+        }
     }
 
     async renderOffers() {
