@@ -317,7 +317,7 @@ class OfferTracker {
         this.addTransaction = async function() {
             await originalAddTransaction();
             await loadMerchants();
-        };
+        }.bind(this);
 
         // Handle merchant selection
         const selectMerchant = async (merchant) => {
