@@ -337,7 +337,13 @@ class DataManager {
                     const currentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
                     const currentMonthData = progress.months.find(m => {
                         if (!m.month) return false;
-                        const monthDate = new Date(m.month + ' 1');
+
+                        // Parse month string more reliably
+                        const monthParts = m.month.split(' ');
+                        const monthName = monthParts[0];
+                        const year = monthParts[1] ? parseInt(monthParts[1]) : today.getFullYear();
+                        const monthDate = new Date(`${monthName} 1, ${year}`);
+
                         return monthDate.getFullYear() === currentMonth.getFullYear() &&
                                monthDate.getMonth() === currentMonth.getMonth();
                     });
