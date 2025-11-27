@@ -167,6 +167,7 @@ class DataManager {
                 const monthTransactionCount = monthTransactions.length;
 
                 let monthCompleted = false;
+                let monthPartiallyCompleted = false;
                 let tierReached = null;
                 let earnedReward = 0;
 
@@ -174,7 +175,15 @@ class DataManager {
                 if (offer.tiers && offer.tiers.length > 0) {
                     tierReached = this.getTierReached(offer, monthSpending, monthTransactionCount);
                     if (tierReached) {
-                        monthCompleted = true;
+                        // Check if this is the highest tier
+                        const highestTier = [...offer.tiers].sort((a, b) => b.threshold - a.threshold)[0];
+                        const isHighestTier = tierReached.threshold === highestTier.threshold;
+
+                        if (isHighestTier) {
+                            monthCompleted = true;
+                        } else {
+                            monthPartiallyCompleted = true;
+                        }
                         earnedReward = tierReached.reward;
                     }
                 } else {
@@ -193,6 +202,7 @@ class DataManager {
                     spending: monthSpending,
                     transactionCount: monthTransactionCount,
                     completed: monthCompleted,
+                    partiallyCompleted: monthPartiallyCompleted,
                     tierReached: tierReached,
                     earnedReward: earnedReward
                 });
@@ -213,6 +223,7 @@ class DataManager {
             const totalTransactions = eligibleTransactions.length;
 
             let completed = false;
+            let partiallyCompleted = false;
             let progress = 0;
             let tierReached = null;
             let earnedReward = 0;
@@ -221,10 +232,17 @@ class DataManager {
             if (offer.tiers && offer.tiers.length > 0) {
                 tierReached = this.getTierReached(offer, totalSpending, totalTransactions);
                 if (tierReached) {
-                    completed = true;
+                    // Check if this is the highest tier
+                    const highestTier = [...offer.tiers].sort((a, b) => b.threshold - a.threshold)[0];
+                    const isHighestTier = tierReached.threshold === highestTier.threshold;
+
+                    if (isHighestTier) {
+                        completed = true;
+                    } else {
+                        partiallyCompleted = true;
+                    }
                     earnedReward = tierReached.reward;
                     // Calculate progress to highest tier
-                    const highestTier = [...offer.tiers].sort((a, b) => b.threshold - a.threshold)[0];
                     const value = offer.type === 'transactions' ? totalTransactions : totalSpending;
                     progress = Math.min((value / highestTier.threshold) * 100, 100);
                 }
@@ -244,6 +262,7 @@ class DataManager {
             return {
                 status,
                 completed,
+                partiallyCompleted,
                 progress,
                 totalSpending,
                 totalTransactions,
