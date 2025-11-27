@@ -142,8 +142,11 @@ class OfferTracker {
 
         peopleList.innerHTML = people.map(person => `
             <div class="person-item">
-                <span>${person.name}</span>
-                <button class="delete-btn" onclick="tracker.deletePerson(${person.id}, '${person.name}')">Delete</button>
+                <span id="person-name-${person.id}">${person.name}</span>
+                <div>
+                    <button class="small-btn" onclick="tracker.renamePerson(${person.id}, '${person.name.replace(/'/g, "\\'")}')">Rename</button>
+                    <button class="delete-btn" onclick="tracker.deletePerson(${person.id}, '${person.name.replace(/'/g, "\\'")}')">Delete</button>
+                </div>
             </div>
         `).join('');
     }
@@ -164,6 +167,26 @@ class OfferTracker {
             await this.loadPeople();
         } catch (error) {
             alert('Failed to add person: ' + error.message);
+        }
+    }
+
+    async renamePerson(id, currentName) {
+        const newName = prompt(`Rename "${currentName}" to:`, currentName);
+
+        if (!newName || newName.trim() === '') {
+            return;
+        }
+
+        if (newName.trim() === currentName) {
+            return; // No change
+        }
+
+        try {
+            await this.dataManager.dbManager.updatePerson(id, newName.trim());
+            await this.renderPeopleList();
+            await this.loadPeople();
+        } catch (error) {
+            alert('Failed to rename person: ' + error.message);
         }
     }
 
@@ -1062,6 +1085,7 @@ class OfferTracker {
                     <div style="font-size: 0.9em; color: #666; margin-bottom: 0.5rem;">${offer.description}</div>
                     <div style="display: flex; gap: 0.5rem;">
                         <button class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.85em;" onclick="tracker.editOffer(${offer.id})">Edit</button>
+                        <button class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.85em;" onclick="tracker.copyOffer(${offer.id})">Copy to...</button>
                         <button class="btn-danger" style="padding: 0.3rem 0.6rem; font-size: 0.85em;" onclick="tracker.deleteOffer(${offer.id})">Delete</button>
                     </div>
                 </div>
@@ -1074,6 +1098,69 @@ class OfferTracker {
     async editOffer(id) {
         const offer = await this.dataManager.getOffer(id);
         this.showOfferForm(offer);
+    }
+
+    async copyOffer(id) {
+        try {
+            // Get the offer data
+            const offer = await this.dataManager.getOffer(id);
+            if (!offer) {
+                alert('Failed to load offer');
+                return;
+            }
+
+            // Get all people except current person
+            const allPeople = await this.dataManager.dbManager.getPeople();
+            const currentPersonId = parseInt(this.dataManager.dbManager.currentPersonId);
+            const otherPeople = allPeople.filter(p => p.id !== currentPersonId);
+
+            if (otherPeople.length === 0) {
+                alert('No other card holders to copy to. Add another card holder first.');
+                return;
+            }
+
+            // Create a simple selection dialog
+            const peopleOptions = otherPeople.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
+            const selection = prompt(`Copy "${offer.name}" to which card holder?\n\n${peopleOptions}\n\nEnter the number:`);
+
+            if (!selection) {
+                return; // User cancelled
+            }
+
+            const selectedIndex = parseInt(selection) - 1;
+            if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= otherPeople.length) {
+                alert('Invalid selection');
+                return;
+            }
+
+            const targetPerson = otherPeople[selectedIndex];
+
+            // Create a copy of the offer with new person_id
+            const offerCopy = {
+                name: offer.name,
+                type: offer.type,
+                startDate: offer.startDate,
+                endDate: offer.endDate,
+                monthlyTracking: offer.monthlyTracking,
+                spendingTarget: offer.spendingTarget,
+                transactionTarget: offer.transactionTarget,
+                minTransaction: offer.minTransaction,
+                categories: offer.categories,
+                reward: offer.reward,
+                bonusReward: offer.bonusReward,
+                tiers: offer.tiers,
+                description: offer.description,
+                personId: targetPerson.id
+            };
+
+            // Save the copied offer
+            await this.dataManager.dbManager.addOffer(offerCopy);
+
+            alert(`Successfully copied "${offer.name}" to ${targetPerson.name}`);
+        } catch (error) {
+            console.error('Error copying offer:', error);
+            alert('Failed to copy offer: ' + error.message);
+        }
     }
 
     getOfferTypeLabel(offer) {
