@@ -77,6 +77,13 @@ class OfferTracker {
             console.log('Rendering offers...');
             await this.renderOffers();
             console.log('All rendering complete');
+
+            // Set default transaction date to today in local timezone
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            document.getElementById('transaction-date').value = `${yyyy}-${mm}-${dd}`;
         } catch (error) {
             console.error('Error in onDatabaseReady:', error);
         }
@@ -561,7 +568,13 @@ class OfferTracker {
         await this.dataManager.addTransaction(transactionData);
 
         form.reset();
-        document.getElementById('transaction-date').valueAsDate = new Date();
+
+        // Set default date to today in local timezone
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        document.getElementById('transaction-date').value = `${yyyy}-${mm}-${dd}`;
 
         // Reset merchant dropdown and hide new merchant input
         merchantSelect.value = '';

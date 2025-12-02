@@ -23,8 +23,11 @@ class DataManager {
 
     // Helper to parse date string as local calendar date at noon (avoids timezone edge cases)
     parseLocalDate(dateString) {
+        // Extract date part if timestamp is included (YYYY-MM-DDT13:00:00 -> YYYY-MM-DD)
+        const datePart = dateString.includes('T') ? dateString.split('T')[0] : dateString;
+
         // Parse YYYY-MM-DD as local date at noon to avoid DST/timezone issues
-        const [year, month, day] = dateString.split('-').map(Number);
+        const [year, month, day] = datePart.split('-').map(Number);
         return new Date(year, month - 1, day, 12, 0, 0);
     }
 
