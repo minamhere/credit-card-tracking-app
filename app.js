@@ -294,17 +294,18 @@ class OfferTracker {
             try {
                 const merchants = await this.dataManager.getUniqueMerchants();
 
-                // Clear existing options except the first two (prompt and "Add New")
+                // Clear existing merchant options but keep the first (prompt) and last ("Add New")
+                // Remove at index 1 repeatedly until only 2 options remain (prompt and Add New)
                 while (merchantSelect.options.length > 2) {
-                    merchantSelect.remove(2);
+                    merchantSelect.remove(1);
                 }
 
-                // Add merchants to dropdown
+                // Add merchants to dropdown before the "Add New" option
                 merchants.forEach(merchant => {
                     const option = document.createElement('option');
                     option.value = merchant;
                     option.textContent = merchant;
-                    merchantSelect.insertBefore(option, merchantSelect.options[1]); // Insert before "Add New"
+                    merchantSelect.insertBefore(option, merchantSelect.options[merchantSelect.options.length - 1]); // Insert before "Add New" (last option)
                 });
             } catch (error) {
                 console.log('Could not load merchants yet:', error);
@@ -538,8 +539,12 @@ class OfferTracker {
             ? document.getElementById('transaction-merchant-new').value
             : merchantSelect.value;
 
+        // Get date and ensure it's stored with 1pm local time to avoid timezone issues
+        const dateValue = document.getElementById('transaction-date').value; // YYYY-MM-DD
+        const dateWithTime = dateValue + 'T13:00:00'; // Store as 1pm local time
+
         const transactionData = {
-            date: document.getElementById('transaction-date').value,
+            date: dateWithTime,
             amount: parseFloat(document.getElementById('transaction-amount').value),
             merchant: merchantValue,
             categories: categories,
@@ -597,7 +602,9 @@ class OfferTracker {
         }
 
         // Populate the edit form
-        document.getElementById('edit-transaction-date').value = transaction.date;
+        // Extract just the date part (YYYY-MM-DD) from the timestamp
+        const dateOnly = transaction.date.includes('T') ? transaction.date.split('T')[0] : transaction.date;
+        document.getElementById('edit-transaction-date').value = dateOnly;
         document.getElementById('edit-transaction-amount').value = transaction.amount;
         document.getElementById('edit-transaction-merchant').value = transaction.merchant;
         document.getElementById('edit-transaction-description').value = transaction.description || '';
@@ -651,8 +658,12 @@ class OfferTracker {
         const editCategoryCheckboxes = document.querySelectorAll('input[name="edit-transaction-category"]:checked');
         const categories = Array.from(editCategoryCheckboxes).map(cb => cb.value);
 
+        // Get date and ensure it's stored with 1pm local time to avoid timezone issues
+        const dateValue = document.getElementById('edit-transaction-date').value; // YYYY-MM-DD
+        const dateWithTime = dateValue + 'T13:00:00'; // Store as 1pm local time
+
         const transactionData = {
-            date: document.getElementById('edit-transaction-date').value,
+            date: dateWithTime,
             amount: parseFloat(document.getElementById('edit-transaction-amount').value),
             merchant: document.getElementById('edit-transaction-merchant').value,
             categories: categories,
@@ -1059,7 +1070,7 @@ class OfferTracker {
                 <div class="transaction-item" style="padding: 0.5rem 1rem; margin-bottom: 0.25rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1; font-size: 0.9rem;">
-                            ${new Date(transaction.date + 'T00:00:00').toLocaleDateString()} • <strong>${transaction.merchant}</strong> • $${transaction.amount.toFixed(2)}${(transaction.categories || []).length > 0 ? ` • ${transaction.categories.join(', ')}` : ''}
+                            ${new Date(transaction.date).toLocaleDateString()} • <strong>${transaction.merchant}</strong> • $${transaction.amount.toFixed(2)}${(transaction.categories || []).length > 0 ? ` • ${transaction.categories.join(', ')}` : ''}
                         </div>
                         <div style="white-space: nowrap; margin-left: 1rem;">
                             <button class="btn-secondary" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; margin-right: 0.25rem;" onclick="tracker.editTransaction(${transaction.id})">Edit</button>
