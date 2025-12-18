@@ -408,29 +408,38 @@ class DataManager {
                 });
             }
 
-            // Sort offers by 6-tier priority system
+            // Sort offers by priority: Active-Urgent, Active-Lower Priority, Expired-Archived, Expired-Missed
             offersWithProgress.sort((a, b) => {
-                // Tier 1: Not complete, expiring soonest (most urgent)
-                // Tier 2: Complete, expiring soonest (recently completed)
-                // Tier 3: Not complete, current month complete (lower priority)
-                // Tier 4: Not complete, expiring later (can wait)
-                // Tier 5: Complete, expired (archived successes)
-                // Tier 6: Not complete, expired (missed opportunities)
+                // Tier 1: Active - Urgent (not complete, not current month complete)
+                // Tier 2: Active - Lower Priority (complete OR current month complete)
+                // Tier 3: Expired - Archived Success (complete, expired)
+                // Tier 4: Expired - Missed (not complete, expired)
+                // Tier 5: Upcoming (not started)
 
                 const getTier = (offer) => {
                     // For monthly offers with no actionable months, treat as effectively done
                     if (offer.monthlyTracking && !offer.hasActionableMonths) {
-                        return offer.isComplete ? 5 : 6; // Archived success or missed opportunity
+                        return offer.isComplete ? 3 : 4; // Archived success or missed opportunity
                     }
 
-                    if (!offer.isComplete && !offer.expired && !offer.notStarted && !offer.currentMonthComplete) return 1; // Urgent incomplete
-                    if (offer.isComplete && !offer.expired) return 2; // Recently completed
-                    if (!offer.isComplete && !offer.expired && !offer.notStarted && offer.currentMonthComplete) return 3; // Current month done
-                    if (!offer.isComplete && !offer.expired && !offer.notStarted) return 4; // Can wait
-                    if (offer.isComplete && offer.expired) return 5; // Archived success
-                    if (!offer.isComplete && offer.expired) return 6; // Missed opportunity
-                    if (offer.notStarted) return 7; // Future offers
-                    return 8; // Unknown state
+                    // Active offers (not expired, started)
+                    if (!offer.expired && !offer.notStarted) {
+                        if (!offer.isComplete && !offer.currentMonthComplete) {
+                            return 1; // Active - Urgent
+                        } else {
+                            return 2; // Active - Lower Priority (completed or current month done)
+                        }
+                    }
+
+                    // Expired offers
+                    if (offer.expired) {
+                        return offer.isComplete ? 3 : 4; // Archived success or missed
+                    }
+
+                    // Upcoming
+                    if (offer.notStarted) return 5;
+
+                    return 6; // Unknown state
                 };
 
                 const aTier = getTier(a);

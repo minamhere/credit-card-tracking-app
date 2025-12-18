@@ -892,13 +892,20 @@ class OfferTracker {
                 const tierBadge = getTierBadge(offer);
 
                 // Render transactions in condensed format: Date - Merchant - Amount - Categories
+                // Format date without timezone conversion
+                const formatDate = (dateStr) => {
+                    const [year, month, day] = dateStr.split('-').map(Number);
+                    const date = new Date(year, month - 1, day);
+                    return date.toLocaleDateString();
+                };
+
                 const transactionsHtml = offer.transactions.length > 0 ? `
                     <div style="margin-top: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 5px;">
                         <strong style="font-size: 0.9em;">Qualifying Transactions (${offer.transactions.length}):</strong>
                         <div style="margin-top: 0.5rem; max-height: 150px; overflow-y: auto; font-size: 0.85em;">
                             ${offer.transactions.map(t => `
                                 <div style="padding: 0.25rem 0; border-bottom: 1px solid #dee2e6;">
-                                    ${new Date(t.date).toLocaleDateString()} • ${t.merchant} • <strong>$${t.amount.toFixed(2)}</strong>${t.categories && t.categories.length > 0 ? ` • ${t.categories.join(', ')}` : ''}
+                                    ${formatDate(t.date)} • ${t.merchant} • <strong>$${t.amount.toFixed(2)}</strong>${t.categories && t.categories.length > 0 ? ` • ${t.categories.join(', ')}` : ''}
                                 </div>
                             `).join('')}
                         </div>
@@ -1049,19 +1056,64 @@ class OfferTracker {
 
     renderSingleProgress(offer, progress) {
         let progressText = '';
+        let tierProgressHtml = '';
 
-        if (offer.type === 'spending' && offer.spendingTarget) {
-            progressText = `$${progress.totalSpending.toFixed(2)} / $${offer.spendingTarget}`;
-        } else if (offer.type === 'transactions' && offer.transactionTarget) {
-            progressText = `${progress.totalTransactions} / ${offer.transactionTarget} transactions`;
+        // Handle tiered offers differently
+        if (offer.tiers && offer.tiers.length > 0) {
+            const sortedTiers = [...offer.tiers].sort((a, b) => a.threshold - b.threshold);
+            const value = offer.type === 'transactions' ? progress.totalTransactions : progress.totalSpending;
+            const valueLabel = offer.type === 'transactions' ? 'transactions' : '';
+
+            // Find which tier was reached
+            const tierReached = progress.tierReached;
+            const tierIndex = tierReached ? sortedTiers.findIndex(t => t.threshold === tierReached.threshold) : -1;
+
+            // Build tier progress display
+            tierProgressHtml = sortedTiers.map((tier, idx) => {
+                const percentage = Math.min((value / tier.threshold) * 100, 100);
+                const isReached = value >= tier.threshold;
+                const isCurrent = !isReached && (idx === 0 || value >= sortedTiers[idx - 1].threshold);
+
+                let bgColor = '#fff';
+                if (isReached && idx === sortedTiers.length - 1) {
+                    bgColor = '#d4edda'; // Green for highest tier reached
+                } else if (isReached) {
+                    bgColor = '#fff3cd'; // Yellow for lower tier reached
+                }
+
+                return `
+                    <div style="margin-bottom: 0.5rem; padding: 0.5rem; border: 1px solid #dee2e6; border-radius: 5px; background: ${bgColor};">
+                        <div style="font-size: 0.85em; margin-bottom: 0.25rem;">
+                            <strong>Tier ${idx + 1}:</strong> ${valueLabel ? `${value}/${tier.threshold} ${valueLabel}` : `$${value.toFixed(2)}/$${tier.threshold}`}
+                            → <strong>$${tier.reward}</strong> ${isReached ? '✓' : ''}
+                        </div>
+                        <div class="offer-progress" style="height: 6px; background: #e9ecef;">
+                            <div class="progress-bar" style="width: ${percentage}%; height: 6px;"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div style="margin-top: 0.5rem;">
+                    ${tierProgressHtml}
+                </div>
+            `;
+        } else {
+            // Non-tiered offers
+            if (offer.type === 'spending' && offer.spendingTarget) {
+                progressText = `$${progress.totalSpending.toFixed(2)} / $${offer.spendingTarget}`;
+            } else if (offer.type === 'transactions' && offer.transactionTarget) {
+                progressText = `${progress.totalTransactions} / ${offer.transactionTarget} transactions`;
+            }
+
+            return `
+                <div class="offer-progress">
+                    <div class="progress-bar" style="width: ${progress.progress}%"></div>
+                </div>
+                <div class="progress-text">${progressText}</div>
+            `;
         }
-
-        return `
-            <div class="offer-progress">
-                <div class="progress-bar" style="width: ${progress.progress}%"></div>
-            </div>
-            <div class="progress-text">${progressText}</div>
-        `;
     }
 
     async renderTransactions() {
@@ -1085,11 +1137,18 @@ class OfferTracker {
                 ? `<div style="margin-top: 0.25rem;">${matchingOffers.map(o => `<div style="font-size: 0.8rem; color: #28a745; margin-left: 1rem; padding: 0.15rem 0;">↳ ${o.name}</div>`).join('')}</div>`
                 : '';
 
+            // Format date without timezone conversion - just parse YYYY-MM-DD and display
+            const formatDate = (dateStr) => {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                const date = new Date(year, month - 1, day);
+                return date.toLocaleDateString();
+            };
+
             return `
                 <div class="transaction-item" style="padding: 0.5rem 1rem; margin-bottom: 0.25rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1; font-size: 0.9rem;">
-                            ${new Date(transaction.date).toLocaleDateString()} • <strong>${transaction.merchant}</strong> • $${transaction.amount.toFixed(2)}${(transaction.categories || []).length > 0 ? ` • ${transaction.categories.join(', ')}` : ''}
+                            ${formatDate(transaction.date)} • <strong>${transaction.merchant}</strong> • $${transaction.amount.toFixed(2)}${(transaction.categories || []).length > 0 ? ` • ${transaction.categories.join(', ')}` : ''}
                         </div>
                         <div style="white-space: nowrap; margin-left: 1rem;">
                             <button class="btn-secondary" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; margin-right: 0.25rem;" onclick="tracker.editTransaction(${transaction.id})">Edit</button>
@@ -1140,15 +1199,52 @@ class OfferTracker {
 
     async renderOffers() {
         const container = document.getElementById('offer-list');
-        const offers = await this.dataManager.getOffers();
+        let offers = await this.dataManager.getOffers();
 
         if (offers.length === 0) {
             container.innerHTML = '<p>No offers yet. Add your first offer above!</p>';
             return;
         }
 
+        // Sort offers: active first, then expired
+        const today = new Date();
+        offers.sort((a, b) => {
+            const aEnd = new Date(a.endDate + 'T23:59:59');
+            const bEnd = new Date(b.endDate + 'T23:59:59');
+            const aExpired = today > aEnd;
+            const bExpired = today > bEnd;
+
+            // Active before expired
+            if (!aExpired && bExpired) return -1;
+            if (aExpired && !bExpired) return 1;
+
+            // Within same status, sort by end date
+            return aEnd - bEnd;
+        });
+
         const offersHtml = await Promise.all(offers.map(async offer => {
             const progress = await this.dataManager.calculateOfferProgress(offer);
+
+            // Format tier targets for display
+            let tierTargetDisplay = '';
+            if (offer.tiers && offer.tiers.length > 0) {
+                const sortedTiers = [...offer.tiers].sort((a, b) => a.threshold - b.threshold);
+                tierTargetDisplay = sortedTiers.map(t => `$${t.threshold}`).join('/');
+            } else if (offer.spendingTarget) {
+                tierTargetDisplay = `$${offer.spendingTarget}`;
+            }
+
+            // Format tier rewards for display
+            let tierRewardsDisplay = '';
+            if (offer.tiers && offer.tiers.length > 0) {
+                const sortedTiers = [...offer.tiers].sort((a, b) => a.threshold - b.threshold);
+                tierRewardsDisplay = `
+                    <div style="font-size: 0.85em; color: #666; margin-top: 0.25rem;">
+                        <strong>Tier Rewards:</strong>
+                        ${sortedTiers.map(t => `<div style="margin-left: 1rem;">• Spend $${t.threshold} → Earn $${t.reward}</div>`).join('')}
+                    </div>
+                `;
+            }
 
             return `
                 <div class="offer-card" style="padding: 1rem; margin-bottom: 0.75rem;">
@@ -1167,11 +1263,12 @@ class OfferTracker {
                                     `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`
                                 }
                             </div>
+                            ${tierRewardsDisplay}
                         </div>
                     </div>
                     <div style="font-size: 0.85em; color: #666; margin-bottom: 0.5rem;">
                         ${new Date(offer.startDate + 'T00:00:00').toLocaleDateString()} - ${new Date(offer.endDate + 'T00:00:00').toLocaleDateString()}
-                        ${offer.spendingTarget ? ` • Target: $${offer.spendingTarget}` : ''}
+                        ${tierTargetDisplay ? ` • Target: ${tierTargetDisplay}` : ''}
                         ${offer.transactionTarget ? ` • ${offer.transactionTarget} transactions` : ''}
                         ${offer.minTransaction ? ` • Min: $${offer.minTransaction}` : ''}
                         ${offer.categories && offer.categories.length > 0 ? ` • ${offer.categories.join(', ')}` : ''}
