@@ -546,12 +546,11 @@ class OfferTracker {
             ? document.getElementById('transaction-merchant-new').value
             : merchantSelect.value;
 
-        // Get date and ensure it's stored with 1pm local time to avoid timezone issues
+        // Get date - store as YYYY-MM-DD (database will treat as local date)
         const dateValue = document.getElementById('transaction-date').value; // YYYY-MM-DD
-        const dateWithTime = dateValue + 'T13:00:00'; // Store as 1pm local time
 
         const transactionData = {
-            date: dateWithTime,
+            date: dateValue,
             amount: parseFloat(document.getElementById('transaction-amount').value),
             merchant: merchantValue,
             categories: categories,
@@ -615,9 +614,17 @@ class OfferTracker {
         }
 
         // Populate the edit form
-        // Extract just the date part (YYYY-MM-DD) from the timestamp
-        const dateOnly = transaction.date.includes('T') ? transaction.date.split('T')[0] : transaction.date;
-        document.getElementById('edit-transaction-date').value = dateOnly;
+        // Extract just the date part (YYYY-MM-DD) in case it has time/timezone info
+        let dateValue = transaction.date;
+        if (typeof dateValue === 'string' && dateValue.includes('T')) {
+            dateValue = dateValue.split('T')[0];
+        } else if (dateValue instanceof Date) {
+            const yyyy = dateValue.getFullYear();
+            const mm = String(dateValue.getMonth() + 1).padStart(2, '0');
+            const dd = String(dateValue.getDate()).padStart(2, '0');
+            dateValue = `${yyyy}-${mm}-${dd}`;
+        }
+        document.getElementById('edit-transaction-date').value = dateValue;
         document.getElementById('edit-transaction-amount').value = transaction.amount;
         document.getElementById('edit-transaction-merchant').value = transaction.merchant;
         document.getElementById('edit-transaction-description').value = transaction.description || '';
@@ -671,12 +678,11 @@ class OfferTracker {
         const editCategoryCheckboxes = document.querySelectorAll('input[name="edit-transaction-category"]:checked');
         const categories = Array.from(editCategoryCheckboxes).map(cb => cb.value);
 
-        // Get date and ensure it's stored with 1pm local time to avoid timezone issues
+        // Get date - store as YYYY-MM-DD (database will treat as local date)
         const dateValue = document.getElementById('edit-transaction-date').value; // YYYY-MM-DD
-        const dateWithTime = dateValue + 'T13:00:00'; // Store as 1pm local time
 
         const transactionData = {
-            date: dateWithTime,
+            date: dateValue,
             amount: parseFloat(document.getElementById('edit-transaction-amount').value),
             merchant: document.getElementById('edit-transaction-merchant').value,
             categories: categories,
