@@ -892,13 +892,20 @@ class OfferTracker {
                 const tierBadge = getTierBadge(offer);
 
                 // Render transactions in condensed format: Date - Merchant - Amount - Categories
+                // Format date without timezone conversion
+                const formatDate = (dateStr) => {
+                    const [year, month, day] = dateStr.split('-').map(Number);
+                    const date = new Date(year, month - 1, day);
+                    return date.toLocaleDateString();
+                };
+
                 const transactionsHtml = offer.transactions.length > 0 ? `
                     <div style="margin-top: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 5px;">
                         <strong style="font-size: 0.9em;">Qualifying Transactions (${offer.transactions.length}):</strong>
                         <div style="margin-top: 0.5rem; max-height: 150px; overflow-y: auto; font-size: 0.85em;">
                             ${offer.transactions.map(t => `
                                 <div style="padding: 0.25rem 0; border-bottom: 1px solid #dee2e6;">
-                                    ${new Date(t.date).toLocaleDateString()} • ${t.merchant} • <strong>$${t.amount.toFixed(2)}</strong>${t.categories && t.categories.length > 0 ? ` • ${t.categories.join(', ')}` : ''}
+                                    ${formatDate(t.date)} • ${t.merchant} • <strong>$${t.amount.toFixed(2)}</strong>${t.categories && t.categories.length > 0 ? ` • ${t.categories.join(', ')}` : ''}
                                 </div>
                             `).join('')}
                         </div>
@@ -1085,11 +1092,18 @@ class OfferTracker {
                 ? `<div style="margin-top: 0.25rem;">${matchingOffers.map(o => `<div style="font-size: 0.8rem; color: #28a745; margin-left: 1rem; padding: 0.15rem 0;">↳ ${o.name}</div>`).join('')}</div>`
                 : '';
 
+            // Format date without timezone conversion - just parse YYYY-MM-DD and display
+            const formatDate = (dateStr) => {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                const date = new Date(year, month - 1, day);
+                return date.toLocaleDateString();
+            };
+
             return `
                 <div class="transaction-item" style="padding: 0.5rem 1rem; margin-bottom: 0.25rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1; font-size: 0.9rem;">
-                            ${new Date(transaction.date).toLocaleDateString()} • <strong>${transaction.merchant}</strong> • $${transaction.amount.toFixed(2)}${(transaction.categories || []).length > 0 ? ` • ${transaction.categories.join(', ')}` : ''}
+                            ${formatDate(transaction.date)} • <strong>${transaction.merchant}</strong> • $${transaction.amount.toFixed(2)}${(transaction.categories || []).length > 0 ? ` • ${transaction.categories.join(', ')}` : ''}
                         </div>
                         <div style="white-space: nowrap; margin-left: 1rem;">
                             <button class="btn-secondary" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; margin-right: 0.25rem;" onclick="tracker.editTransaction(${transaction.id})">Edit</button>
@@ -1140,12 +1154,28 @@ class OfferTracker {
 
     async renderOffers() {
         const container = document.getElementById('offer-list');
-        const offers = await this.dataManager.getOffers();
+        let offers = await this.dataManager.getOffers();
 
         if (offers.length === 0) {
             container.innerHTML = '<p>No offers yet. Add your first offer above!</p>';
             return;
         }
+
+        // Sort offers: active first, then expired
+        const today = new Date();
+        offers.sort((a, b) => {
+            const aEnd = new Date(a.endDate + 'T23:59:59');
+            const bEnd = new Date(b.endDate + 'T23:59:59');
+            const aExpired = today > aEnd;
+            const bExpired = today > bEnd;
+
+            // Active before expired
+            if (!aExpired && bExpired) return -1;
+            if (aExpired && !bExpired) return 1;
+
+            // Within same status, sort by end date
+            return aEnd - bEnd;
+        });
 
         const offersHtml = await Promise.all(offers.map(async offer => {
             const progress = await this.dataManager.calculateOfferProgress(offer);
