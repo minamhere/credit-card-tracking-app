@@ -189,6 +189,21 @@ class DataManager {
                         }
                         earnedReward = tierReached.reward;
                     }
+                } else if (offer.type === 'percent-back') {
+                    // Percent-back calculation
+                    // Check if minimum spend threshold is met (if specified)
+                    const meetsMinSpend = !offer.minSpendThreshold || monthSpending >= offer.minSpendThreshold;
+
+                    if (meetsMinSpend && offer.percentBack) {
+                        // Calculate percent back
+                        earnedReward = monthSpending * (offer.percentBack / 100);
+
+                        // Apply max back cap if specified
+                        if (offer.maxBack && earnedReward > offer.maxBack) {
+                            earnedReward = offer.maxBack;
+                            monthCompleted = true; // Hit the cap
+                        }
+                    }
                 } else {
                     // Use traditional completion logic
                     if (offer.type === 'spending' && offer.spendingTarget) {
@@ -248,6 +263,25 @@ class DataManager {
                     // Calculate progress to highest tier
                     const value = offer.type === 'transactions' ? totalTransactions : totalSpending;
                     progress = Math.min((value / highestTier.threshold) * 100, 100);
+                }
+            } else if (offer.type === 'percent-back') {
+                // Percent-back calculation
+                const meetsMinSpend = !offer.minSpendThreshold || totalSpending >= offer.minSpendThreshold;
+
+                if (meetsMinSpend && offer.percentBack) {
+                    earnedReward = totalSpending * (offer.percentBack / 100);
+
+                    // Apply max back cap if specified
+                    if (offer.maxBack) {
+                        if (earnedReward >= offer.maxBack) {
+                            earnedReward = offer.maxBack;
+                            completed = true; // Hit the cap
+                        }
+                        progress = Math.min((earnedReward / offer.maxBack) * 100, 100);
+                    } else {
+                        // No cap, calculate progress based on spending
+                        progress = totalSpending > 0 ? 50 : 0; // Arbitrary progress indicator
+                    }
                 }
             } else {
                 // Traditional logic
