@@ -59,9 +59,29 @@ class OfferTracker {
         this.setupEventListeners();
         this.setupTabs();
         this.renderCategoryCheckboxes();
+        this.setupOfferTypeToggle();
 
         // Initialize database (will show modal)
         await this.dataManager.initialize();
+    }
+
+    setupOfferTypeToggle() {
+        const offerTypeSelect = document.getElementById('offer-type');
+        const percentBackFields = document.getElementById('percent-back-fields');
+        const standardFields = document.getElementById('standard-offer-fields');
+        const rewardFields = document.getElementById('reward-fields');
+
+        offerTypeSelect.addEventListener('change', (e) => {
+            if (e.target.value === 'percent-back') {
+                percentBackFields.style.display = 'block';
+                standardFields.style.display = 'none';
+                rewardFields.style.display = 'none';
+            } else {
+                percentBackFields.style.display = 'none';
+                standardFields.style.display = 'block';
+                rewardFields.style.display = 'block';
+            }
+        });
     }
 
     async onDatabaseReady() {
@@ -716,10 +736,29 @@ class OfferTracker {
             document.getElementById('offer-spending-target').value = offer.spendingTarget || '';
             document.getElementById('offer-transaction-target').value = offer.transactionTarget || '';
             document.getElementById('offer-min-transaction').value = offer.minTransaction || '';
-            document.getElementById('offer-reward').value = offer.reward;
+            document.getElementById('offer-reward').value = offer.reward || '';
             document.getElementById('offer-bonus-reward').value = offer.bonusReward || '';
             document.getElementById('offer-description').value = offer.description || '';
             document.getElementById('offer-monthly-tracking').checked = offer.monthlyTracking || false;
+
+            // Populate percent-back fields
+            document.getElementById('offer-percent-back').value = offer.percentBack || '';
+            document.getElementById('offer-max-back').value = offer.maxBack || '';
+            document.getElementById('offer-min-spend-threshold').value = offer.minSpendThreshold || '';
+
+            // Show/hide appropriate fields based on type
+            const percentBackFields = document.getElementById('percent-back-fields');
+            const standardFields = document.getElementById('standard-offer-fields');
+            const rewardFields = document.getElementById('reward-fields');
+            if (offer.type === 'percent-back') {
+                percentBackFields.style.display = 'block';
+                standardFields.style.display = 'none';
+                rewardFields.style.display = 'none';
+            } else {
+                percentBackFields.style.display = 'none';
+                standardFields.style.display = 'block';
+                rewardFields.style.display = 'block';
+            }
 
             // Check the appropriate category checkboxes
             const offerCategoryCheckboxes = document.querySelectorAll('input[name="offer-category"]');
@@ -805,6 +844,9 @@ class OfferTracker {
             reward: parseNumber(formData.get('offer-reward') || document.getElementById('offer-reward').value) || 0,
             bonusReward: parseNumber(formData.get('offer-bonus-reward') || document.getElementById('offer-bonus-reward').value),
             tiers: tiers,
+            percentBack: parseNumber(document.getElementById('offer-percent-back').value),
+            maxBack: parseNumber(document.getElementById('offer-max-back').value),
+            minSpendThreshold: parseNumber(document.getElementById('offer-min-spend-threshold').value),
             description: formData.get('offer-description') || document.getElementById('offer-description').value || '',
             monthlyTracking: document.getElementById('offer-monthly-tracking').checked,
             personId: parseInt(personId)
