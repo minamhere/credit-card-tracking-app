@@ -60,6 +60,7 @@ class OfferTracker {
         this.setupTabs();
         this.renderCategoryCheckboxes();
         this.setupOfferTypeToggle();
+        this.setupThemeToggle();
 
         // Initialize database (will show modal)
         await this.dataManager.initialize();
@@ -81,6 +82,40 @@ class OfferTracker {
                 standardFields.style.display = 'block';
                 rewardFields.style.display = 'block';
             }
+        });
+    }
+
+    setupThemeToggle() {
+        // Load saved theme or default to light mode
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+
+        // Update toggle button text and icon
+        const themeToggle = document.getElementById('theme-toggle');
+        const themeIcon = themeToggle.querySelector('.theme-toggle-icon');
+        const themeText = themeToggle.querySelector('.theme-toggle-text');
+
+        const updateThemeButton = (theme) => {
+            if (theme === 'dark') {
+                themeIcon.textContent = '☀️';
+                themeText.textContent = 'Light Mode';
+            } else {
+                themeIcon.textContent = '🌙';
+                themeText.textContent = 'Dark Mode';
+            }
+        };
+
+        // Set initial button state
+        updateThemeButton(savedTheme);
+
+        // Toggle theme on button click
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateThemeButton(newTheme);
         });
     }
 
