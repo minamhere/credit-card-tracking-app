@@ -59,9 +59,29 @@ class OfferTracker {
         this.setupEventListeners();
         this.setupTabs();
         this.renderCategoryCheckboxes();
+        this.setupOfferTypeToggle();
 
         // Initialize database (will show modal)
         await this.dataManager.initialize();
+    }
+
+    setupOfferTypeToggle() {
+        const offerTypeSelect = document.getElementById('offer-type');
+        const percentBackFields = document.getElementById('percent-back-fields');
+        const standardFields = document.getElementById('standard-offer-fields');
+        const rewardFields = document.getElementById('reward-fields');
+
+        offerTypeSelect.addEventListener('change', (e) => {
+            if (e.target.value === 'percent-back') {
+                percentBackFields.style.display = 'block';
+                standardFields.style.display = 'none';
+                rewardFields.style.display = 'none';
+            } else {
+                percentBackFields.style.display = 'none';
+                standardFields.style.display = 'block';
+                rewardFields.style.display = 'block';
+            }
+        });
     }
 
     async onDatabaseReady() {
@@ -716,10 +736,29 @@ class OfferTracker {
             document.getElementById('offer-spending-target').value = offer.spendingTarget || '';
             document.getElementById('offer-transaction-target').value = offer.transactionTarget || '';
             document.getElementById('offer-min-transaction').value = offer.minTransaction || '';
-            document.getElementById('offer-reward').value = offer.reward;
+            document.getElementById('offer-reward').value = offer.reward || '';
             document.getElementById('offer-bonus-reward').value = offer.bonusReward || '';
             document.getElementById('offer-description').value = offer.description || '';
             document.getElementById('offer-monthly-tracking').checked = offer.monthlyTracking || false;
+
+            // Populate percent-back fields
+            document.getElementById('offer-percent-back').value = offer.percentBack || '';
+            document.getElementById('offer-max-back').value = offer.maxBack || '';
+            document.getElementById('offer-min-spend-threshold').value = offer.minSpendThreshold || '';
+
+            // Show/hide appropriate fields based on type
+            const percentBackFields = document.getElementById('percent-back-fields');
+            const standardFields = document.getElementById('standard-offer-fields');
+            const rewardFields = document.getElementById('reward-fields');
+            if (offer.type === 'percent-back') {
+                percentBackFields.style.display = 'block';
+                standardFields.style.display = 'none';
+                rewardFields.style.display = 'none';
+            } else {
+                percentBackFields.style.display = 'none';
+                standardFields.style.display = 'block';
+                rewardFields.style.display = 'block';
+            }
 
             // Check the appropriate category checkboxes
             const offerCategoryCheckboxes = document.querySelectorAll('input[name="offer-category"]');
@@ -805,6 +844,9 @@ class OfferTracker {
             reward: parseNumber(formData.get('offer-reward') || document.getElementById('offer-reward').value) || 0,
             bonusReward: parseNumber(formData.get('offer-bonus-reward') || document.getElementById('offer-bonus-reward').value),
             tiers: tiers,
+            percentBack: parseNumber(document.getElementById('offer-percent-back').value),
+            maxBack: parseNumber(document.getElementById('offer-max-back').value),
+            minSpendThreshold: parseNumber(document.getElementById('offer-min-spend-threshold').value),
             description: formData.get('offer-description') || document.getElementById('offer-description').value || '',
             monthlyTracking: document.getElementById('offer-monthly-tracking').checked,
             personId: parseInt(personId)
@@ -997,7 +1039,18 @@ class OfferTracker {
             const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
             const isExpired = monthEnd < today && !month.completed;
 
-            if (offer.type === 'spending' && offer.spendingTarget) {
+            if (offer.type === 'percent-back') {
+                const earnedReward = month.earnedReward || 0;
+                if (offer.maxBack) {
+                    percentage = Math.min((earnedReward / offer.maxBack) * 100, 100);
+                    progressBar = `<div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>`;
+                    progressText = `$${earnedReward.toFixed(2)}/$${offer.maxBack}`;
+                } else {
+                    percentage = month.spending > 0 ? 50 : 0; // Arbitrary progress
+                    progressBar = `<div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>`;
+                    progressText = `$${earnedReward.toFixed(2)} (${offer.percentBack}%)`;
+                }
+            } else if (offer.type === 'spending' && offer.spendingTarget) {
                 percentage = Math.min((month.spending / offer.spendingTarget) * 100, 100);
                 progressBar = `<div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>`;
                 progressText = `$${month.spending.toFixed(0)}/$${offer.spendingTarget}`;
@@ -1101,7 +1154,14 @@ class OfferTracker {
             `;
         } else {
             // Non-tiered offers
-            if (offer.type === 'spending' && offer.spendingTarget) {
+            if (offer.type === 'percent-back') {
+                const earnedReward = progress.earnedReward || 0;
+                if (offer.maxBack) {
+                    progressText = `$${earnedReward.toFixed(2)} / $${offer.maxBack} max back`;
+                } else {
+                    progressText = `$${earnedReward.toFixed(2)} earned (${offer.percentBack}% of $${progress.totalSpending.toFixed(2)})`;
+                }
+            } else if (offer.type === 'spending' && offer.spendingTarget) {
                 progressText = `$${progress.totalSpending.toFixed(2)} / $${offer.spendingTarget}`;
             } else if (offer.type === 'transactions' && offer.transactionTarget) {
                 progressText = `${progress.totalTransactions} / ${offer.transactionTarget} transactions`;
@@ -1258,9 +1318,13 @@ class OfferTracker {
                         </div>
                         <div style="flex: 0 1 auto; text-align: right; white-space: nowrap;">
                             <div style="font-size: 1.1em; font-weight: bold;">
-                                ${offer.monthlyTracking && progress.months ?
-                                    `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
-                                    `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`
+                                ${offer.type === 'percent-back' ?
+                                    (offer.monthlyTracking && progress.months ?
+                                        `$${progress.months.reduce((sum, m) => sum + (m.earnedReward || 0), 0).toFixed(2)} earned` :
+                                        `$${(progress.earnedReward || 0).toFixed(2)} earned`) :
+                                    (offer.monthlyTracking && progress.months ?
+                                        `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
+                                        `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
                                 }
                             </div>
                             ${tierRewardsDisplay}
@@ -1268,9 +1332,10 @@ class OfferTracker {
                     </div>
                     <div style="font-size: 0.85em; color: #666; margin-bottom: 0.5rem;">
                         ${new Date(offer.startDate + 'T00:00:00').toLocaleDateString()} - ${new Date(offer.endDate + 'T00:00:00').toLocaleDateString()}
-                        ${tierTargetDisplay ? ` • Target: ${tierTargetDisplay}` : ''}
-                        ${offer.transactionTarget ? ` • ${offer.transactionTarget} transactions` : ''}
-                        ${offer.minTransaction ? ` • Min: $${offer.minTransaction}` : ''}
+                        ${offer.type === 'percent-back' ?
+                            `${offer.percentBack ? ` • ${offer.percentBack}% back` : ''}${offer.maxBack ? ` • Max: $${offer.maxBack}${offer.monthlyTracking ? '/month' : ''}` : ''}${offer.minSpendThreshold ? ` • Min spend: $${offer.minSpendThreshold}${offer.monthlyTracking ? '/month' : ''}` : ''}` :
+                            `${tierTargetDisplay ? ` • Target: ${tierTargetDisplay}` : ''}${offer.transactionTarget ? ` • ${offer.transactionTarget} transactions` : ''}${offer.minTransaction ? ` • Min: $${offer.minTransaction}` : ''}`
+                        }
                         ${offer.categories && offer.categories.length > 0 ? ` • ${offer.categories.join(', ')}` : ''}
                     </div>
                     <div style="font-size: 0.9em; color: #666; margin-bottom: 0.5rem;">${offer.description}</div>
@@ -1358,7 +1423,9 @@ class OfferTracker {
         let label = '';
 
         // Determine base type
-        if (offer.type === 'spending' && offer.spendingTarget) {
+        if (offer.type === 'percent-back') {
+            label = offer.monthlyTracking ? 'Monthly Percent Back' : 'Percent Back';
+        } else if (offer.type === 'spending' && offer.spendingTarget) {
             if (offer.monthlyTracking) {
                 label = 'Monthly Spending';
                 if (offer.bonusReward) {

@@ -161,6 +161,7 @@
                                     <option value="spending">Spending Amount</option>
                                     <option value="transactions">Number of Transactions</option>
                                     <option value="combo">Combination</option>
+                                    <option value="percent-back">Percent Back</option>
                                 </select>
                             </div>
                         </div>
@@ -179,20 +180,43 @@
                                 </label>
                             </div>
                         </div>
-                        <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
-                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
-                                <label for="offer-spending-target">Spending ($):</label>
-                                <input type="number" id="offer-spending-target" step="0.01" min="0">
-                            </div>
-                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
-                                <label for="offer-transaction-target">Transactions:</label>
-                                <input type="number" id="offer-transaction-target" min="0">
-                            </div>
-                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
-                                <label for="offer-min-transaction">Min Amount ($):</label>
-                                <input type="number" id="offer-min-transaction" step="0.01" min="0">
+
+                        <!-- Percent Back Fields -->
+                        <div id="percent-back-fields" style="display: none;">
+                            <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                                <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                    <label for="offer-percent-back">Percent (%):</label>
+                                    <input type="number" id="offer-percent-back" step="0.1" min="0" max="100">
+                                </div>
+                                <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                    <label for="offer-max-back">Max Back/Month ($):</label>
+                                    <input type="number" id="offer-max-back" step="0.01" min="0">
+                                </div>
+                                <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                    <label for="offer-min-spend-threshold">Min Spend/Month ($):</label>
+                                    <input type="number" id="offer-min-spend-threshold" step="0.01" min="0">
+                                </div>
                             </div>
                         </div>
+
+                        <!-- Standard Offer Fields -->
+                        <div id="standard-offer-fields">
+                            <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                                <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                    <label for="offer-spending-target">Spending ($):</label>
+                                    <input type="number" id="offer-spending-target" step="0.01" min="0">
+                                </div>
+                                <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                    <label for="offer-transaction-target">Transactions:</label>
+                                    <input type="number" id="offer-transaction-target" min="0">
+                                </div>
+                                <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                    <label for="offer-min-transaction">Min Amount ($):</label>
+                                    <input type="number" id="offer-min-transaction" step="0.01" min="0">
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="form-group">
                             <label>Required Categories (select any that apply):</label>
                             <div id="offer-categories-checkboxes" class="checkbox-group">
@@ -204,24 +228,28 @@
                             </div>
                             <small style="color: #666;">Leave unchecked to accept any category</small>
                         </div>
-                        <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
-                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
-                                <label for="offer-reward">Reward ($):</label>
-                                <input type="number" id="offer-reward" step="0.01" min="0">
+
+                        <div id="reward-fields">
+                            <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                                <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                    <label for="offer-reward">Reward ($):</label>
+                                    <input type="number" id="offer-reward" step="0.01" min="0">
+                                </div>
+                                <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+                                    <label for="offer-bonus-reward">Bonus ($):</label>
+                                    <input type="number" id="offer-bonus-reward" step="0.01" min="0">
+                                </div>
+                                <div style="flex: 1; display: flex; align-items: flex-end; font-size: 0.85em; color: #666; padding-bottom: 0.5rem;">
+                                    Reward: base/month, Bonus: completion bonus
+                                </div>
                             </div>
-                            <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
-                                <label for="offer-bonus-reward">Bonus ($):</label>
-                                <input type="number" id="offer-bonus-reward" step="0.01" min="0">
-                            </div>
-                            <div style="flex: 1; display: flex; align-items: flex-end; font-size: 0.85em; color: #666; padding-bottom: 0.5rem;">
-                                Reward: base/month, Bonus: completion bonus
+                            <div class="form-group">
+                                <label for="offer-tiers">Tiered Rewards (optional):</label>
+                                <textarea id="offer-tiers" rows="2" placeholder="750:125&#10;1500:200"></textarea>
+                                <small style="color: #666;">Enter "spending:reward" per line</small>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label for="offer-tiers">Tiered Rewards (optional):</label>
-                            <textarea id="offer-tiers" rows="2" placeholder="750:125&#10;1500:200"></textarea>
-                            <small style="color: #666;">Enter "spending:reward" per line</small>
-                        </div>
+
                         <div class="form-group">
                             <label for="offer-description">Description:</label>
                             <textarea id="offer-description" rows="2"></textarea>
