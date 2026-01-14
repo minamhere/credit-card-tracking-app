@@ -1375,8 +1375,8 @@ class OfferTracker {
                                         `$${progress.months.reduce((sum, m) => sum + (m.earnedReward || 0), 0).toFixed(2)} earned` :
                                         `$${(progress.earnedReward || 0).toFixed(2)} earned`) :
                                     (offer.monthlyTracking && progress.months ?
-                                        `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
-                                        `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
+                                        `$${offer.reward || 0}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${((offer.reward || 0) * progress.months.length) + (offer.bonusReward || 0)}` :
+                                        `$${offer.reward || 0}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
                                 }
                             </div>
                             ${tierRewardsDisplay}
