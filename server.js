@@ -133,7 +133,10 @@ app.get('/api/offers', async (req, res) => {
       tiers: row.tiers || [],
       description: row.description,
       monthlyTracking: row.monthly_tracking,
-      personId: row.person_id
+      personId: row.person_id,
+      percentBack: row.percent_back,
+      maxBack: row.max_back,
+      minSpendThreshold: row.min_spend_threshold
     }));
     res.json(offers);
   } catch (err) {
