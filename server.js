@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const { Pool } = require('pg');
+const fs = require('fs');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -18,6 +19,20 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: shouldUseSSL ? { rejectUnauthorized: false } : false
 });
+
+// Run migrations on startup
+async function runMigrations() {
+  try {
+    const migrationsPath = path.join(__dirname, 'migrations.sql');
+    if (fs.existsSync(migrationsPath)) {
+      const sql = fs.readFileSync(migrationsPath, 'utf8');
+      await pool.query(sql);
+      console.log('Migrations completed successfully');
+    }
+  } catch (err) {
+    console.error('Error running migrations:', err);
+  }
+}
 
 // Middleware
 app.use(cors());
@@ -131,20 +146,23 @@ app.post('/api/offers', async (req, res) => {
   try {
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
-      minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId
+      minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId,
+      percentBack, maxBack, minSpendThreshold
     } = req.body;
 
     const result = await pool.query(`
       INSERT INTO offers (
         name, type, start_date, end_date, spending_target,
         transaction_target, min_transaction, categories, reward,
-        bonus_reward, tiers, description, monthly_tracking, person_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        bonus_reward, tiers, description, monthly_tracking, person_id,
+        percent_back, max_back, min_spend_threshold
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
       transactionTarget, minTransaction, categories || [], reward,
-      bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId
+      bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId,
+      percentBack, maxBack, minSpendThreshold
     ]);
 
     const offer = {
@@ -162,7 +180,10 @@ app.post('/api/offers', async (req, res) => {
       tiers: result.rows[0].tiers || [],
       description: result.rows[0].description,
       monthlyTracking: result.rows[0].monthly_tracking,
-      personId: result.rows[0].person_id
+      personId: result.rows[0].person_id,
+      percentBack: result.rows[0].percent_back,
+      maxBack: result.rows[0].max_back,
+      minSpendThreshold: result.rows[0].min_spend_threshold
     };
 
     res.json(offer);
@@ -177,7 +198,8 @@ app.put('/api/offers/:id', async (req, res) => {
     const { id } = req.params;
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
-      minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId
+      minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId,
+      percentBack, maxBack, minSpendThreshold
     } = req.body;
 
     const result = await pool.query(`
@@ -185,13 +207,14 @@ app.put('/api/offers/:id', async (req, res) => {
         name = $1, type = $2, start_date = $3, end_date = $4,
         spending_target = $5, transaction_target = $6, min_transaction = $7,
         categories = $8, reward = $9, bonus_reward = $10, tiers = $11, description = $12,
-        monthly_tracking = $13, person_id = $14
-      WHERE id = $15
+        monthly_tracking = $13, person_id = $14, percent_back = $15, max_back = $16, min_spend_threshold = $17
+      WHERE id = $18
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
       transactionTarget, minTransaction, categories || [], reward,
-      bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId, id
+      bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId,
+      percentBack, maxBack, minSpendThreshold, id
     ]);
 
     if (result.rows.length === 0) {
@@ -213,7 +236,10 @@ app.put('/api/offers/:id', async (req, res) => {
       tiers: result.rows[0].tiers || [],
       description: result.rows[0].description,
       monthlyTracking: result.rows[0].monthly_tracking,
-      personId: result.rows[0].person_id
+      personId: result.rows[0].person_id,
+      percentBack: result.rows[0].percent_back,
+      maxBack: result.rows[0].max_back,
+      minSpendThreshold: result.rows[0].min_spend_threshold
     };
 
     res.json(offer);
@@ -263,7 +289,10 @@ app.get('/api/offers/:id', async (req, res) => {
       tiers: result.rows[0].tiers || [],
       description: result.rows[0].description,
       monthlyTracking: result.rows[0].monthly_tracking,
-      personId: result.rows[0].person_id
+      personId: result.rows[0].person_id,
+      percentBack: result.rows[0].percent_back,
+      maxBack: result.rows[0].max_back,
+      minSpendThreshold: result.rows[0].min_spend_threshold
     };
 
     res.json(offer);
@@ -422,7 +451,8 @@ app.post('/api/initialize', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
+app.listen(port, async () => {
   console.log(`Server running on port ${port}`);
   console.log(`Visit http://localhost:${port} to view the app`);
+  await runMigrations();
 });
