@@ -935,8 +935,19 @@ class OfferTracker {
                     } else {
                         totalPotential += highestTier.reward;
                     }
+                } else if (offer.type === 'percent-back') {
+                    // For percent-back offers, use maxBack as potential
+                    if (offer.maxBack) {
+                        if (offer.monthlyTracking) {
+                            const monthCount = progress.months ? progress.months.length : 1;
+                            totalPotential += offer.maxBack * monthCount;
+                        } else {
+                            totalPotential += offer.maxBack;
+                        }
+                    }
+                    // If no maxBack, we can't calculate a fixed potential
                 } else {
-                    totalPotential += offer.reward;
+                    totalPotential += offer.reward || 0;
                     if (offer.bonusReward) {
                         totalPotential += offer.bonusReward;
                     }
@@ -996,9 +1007,15 @@ class OfferTracker {
                                 <div class="offer-name" style="margin-bottom: 0.25rem; flex: 1 1 60%; min-width: 200px;">${offer.name}</div>
                                 <div style="flex: 0 1 auto; text-align: right; white-space: nowrap;">
                                     <div style="font-size: 1.1em; font-weight: bold;">
-                                        ${offer.monthlyTracking && progress.months ?
-                                            `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
-                                            `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`
+                                        ${offer.type === 'percent-back' ?
+                                            (offer.maxBack ?
+                                                (offer.monthlyTracking && progress.months ?
+                                                    `Max: $${offer.maxBack}/mo × ${progress.months.length} = $${(offer.maxBack * progress.months.length).toFixed(2)}` :
+                                                    `Max: $${offer.maxBack}`) :
+                                                `${offer.percentBack}% back`) :
+                                            (offer.monthlyTracking && progress.months ?
+                                                `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
+                                                `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
                                         }
                                     </div>
                                     <div style="font-size: 0.8em; color: #666;">Earned: $${earned.toFixed(2)}</div>
@@ -1358,8 +1375,8 @@ class OfferTracker {
                                         `$${progress.months.reduce((sum, m) => sum + (m.earnedReward || 0), 0).toFixed(2)} earned` :
                                         `$${(progress.earnedReward || 0).toFixed(2)} earned`) :
                                     (offer.monthlyTracking && progress.months ?
-                                        `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
-                                        `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
+                                        `$${offer.reward || 0}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${((offer.reward || 0) * progress.months.length) + (offer.bonusReward || 0)}` :
+                                        `$${offer.reward || 0}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
                                 }
                             </div>
                             ${tierRewardsDisplay}
