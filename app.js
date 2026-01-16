@@ -913,7 +913,11 @@ class OfferTracker {
 
         try {
             // Get simplified offer list with progress and transactions
-            const offers = await this.dataManager.getSimplifiedOfferList();
+            const allOffers = await this.dataManager.getSimplifiedOfferList();
+
+            // Separate visible and hidden offers
+            const offers = allOffers.filter(o => !o.hidden);
+            const hiddenOffers = allOffers.filter(o => o.hidden);
 
             let totalEarned = 0;
             let totalPotential = 0;
@@ -1038,6 +1042,11 @@ class OfferTracker {
                         <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 0.5rem;">${offer.description}</div>
                         ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
                         ${transactionsHtml}
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            ${offer.bonusReward && !offer.bonusPosted ? `<button class="btn-primary" style="padding: 0.3rem 0.6rem; font-size: 0.85em; margin: 0;" onclick="tracker.markBonusPosted(${offer.id})">Mark Bonus Posted</button>` : ''}
+                            ${offer.bonusReward && offer.bonusPosted ? `<span style="font-size: 0.85em; color: #28a745; font-weight: bold;">✓ Bonus Posted${offer.bonusPostedDate ? ` on ${new Date(offer.bonusPostedDate).toLocaleDateString()}` : ''}</span>` : ''}
+                            ${offer.expired || progress.status === 'completed' ? `<button class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.85em; margin: 0;" onclick="tracker.hideOffer(${offer.id})">Hide Offer</button>` : ''}
+                        </div>
                     </div>
                 `;
             });
@@ -1062,8 +1071,45 @@ class OfferTracker {
                 </div>
             `;
 
+            // Hidden offers section
+            const hiddenSection = hiddenOffers.length > 0 ? `
+                <div style="margin-top: 2rem; border-top: 2px solid var(--border-color); padding-top: 2rem;">
+                    <button onclick="tracker.toggleHiddenOffers()" style="width: 100%; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 5px; cursor: pointer; font-size: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: bold; color: var(--text-primary);">📦 Hidden Offers (${hiddenOffers.length})</span>
+                        <span id="hidden-toggle-icon">▼</span>
+                    </button>
+                    <div id="hidden-offers-container" style="display: none; margin-top: 1rem;">
+                        ${hiddenOffers.map(offer => {
+                            const progress = offer.progress;
+                            let earned = 0;
+                            if (offer.monthlyTracking && progress.months) {
+                                earned = Number(progress.months.reduce((sum, month) => sum + Number(month.earnedReward || 0), 0));
+                            } else if (progress.earnedReward) {
+                                earned = Number(progress.earnedReward);
+                            }
+
+                            return `
+                                <div class="offer-card" style="opacity: 0.7;">
+                                    <div style="margin-bottom: 0.5rem;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <div class="offer-name">${offer.name}</div>
+                                            <div style="font-size: 0.9em; color: var(--text-secondary);">
+                                                ${offer.expired ? 'Expired' : 'Completed'} | Earned: $${Number(earned).toFixed(2)}
+                                            </div>
+                                        </div>
+                                        <div style="margin-top: 0.5rem;">
+                                            <button class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.85em;" onclick="tracker.unhideOffer(${offer.id})">Unhide Offer</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            ` : '';
+
             // Show offers sorted by priority
-            container.innerHTML = summary + offerCards.join('');
+            container.innerHTML = summary + offerCards.join('') + hiddenSection;
 
         } catch (error) {
             console.error('Error rendering dashboard:', error);
@@ -1648,6 +1694,85 @@ class OfferTracker {
                 </div>
             </div>
         `;
+    }
+
+    async markBonusPosted(offerId) {
+        const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+        try {
+            const response = await fetch(`/api/offers/${offerId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    bonusPosted: true,
+                    bonusPostedDate: date,
+                    bonusPostedAmount: null, // Can be expanded to prompt for amount
+                    hidden: false
+                })
+            });
+
+            if (!response.ok) throw new Error('Failed to mark bonus posted');
+
+            await this.renderDashboard();
+            await this.renderOffers();
+        } catch (error) {
+            alert('Failed to mark bonus as posted: ' + error.message);
+        }
+    }
+
+    async hideOffer(offerId) {
+        try {
+            const response = await fetch(`/api/offers/${offerId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    bonusPosted: null,
+                    bonusPostedDate: null,
+                    bonusPostedAmount: null,
+                    hidden: true
+                })
+            });
+
+            if (!response.ok) throw new Error('Failed to hide offer');
+
+            await this.renderDashboard();
+            await this.renderOffers();
+        } catch (error) {
+            alert('Failed to hide offer: ' + error.message);
+        }
+    }
+
+    async unhideOffer(offerId) {
+        try {
+            const response = await fetch(`/api/offers/${offerId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    bonusPosted: null,
+                    bonusPostedDate: null,
+                    bonusPostedAmount: null,
+                    hidden: false
+                })
+            });
+
+            if (!response.ok) throw new Error('Failed to unhide offer');
+
+            await this.renderDashboard();
+            await this.renderOffers();
+        } catch (error) {
+            alert('Failed to unhide offer: ' + error.message);
+        }
+    }
+
+    toggleHiddenOffers() {
+        const container = document.getElementById('hidden-offers-container');
+        const icon = document.getElementById('hidden-toggle-icon');
+        if (container.style.display === 'none') {
+            container.style.display = 'block';
+            icon.textContent = '▲';
+        } else {
+            container.style.display = 'none';
+            icon.textContent = '▼';
+        }
     }
 }
 
