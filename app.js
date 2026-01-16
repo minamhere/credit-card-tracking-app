@@ -988,11 +988,11 @@ class OfferTracker {
                 };
 
                 const transactionsHtml = offer.transactions.length > 0 ? `
-                    <div style="margin-top: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 5px;">
+                    <div style="margin-top: 0.75rem; padding: 0.75rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 5px;">
                         <strong style="font-size: 0.9em;">Qualifying Transactions (${offer.transactions.length}):</strong>
                         <div style="margin-top: 0.5rem; max-height: 150px; overflow-y: auto; font-size: 0.85em;">
                             ${offer.transactions.map(t => `
-                                <div style="padding: 0.25rem 0; border-bottom: 1px solid #dee2e6;">
+                                <div style="padding: 0.25rem 0; border-bottom: 1px solid var(--border-color);">
                                     ${formatDate(t.date)} • ${t.merchant} • <strong>$${t.amount.toFixed(2)}</strong>${t.categories && t.categories.length > 0 ? ` • ${t.categories.join(', ')}` : ''}
                                 </div>
                             `).join('')}
@@ -1018,7 +1018,7 @@ class OfferTracker {
                                                 `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
                                         }
                                     </div>
-                                    <div style="font-size: 0.8em; color: #666;">Earned: $${Number(earned).toFixed(2)}</div>
+                                    <div style="font-size: 0.8em; color: var(--text-secondary);">Earned: $${Number(earned).toFixed(2)}</div>
                                 </div>
                             </div>
                             <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
@@ -1029,13 +1029,13 @@ class OfferTracker {
                                 <span class="offer-type-badge" style="font-size: 0.75em; padding: 0.2rem 0.5rem;">${this.getOfferTypeLabel(offer)}</span>
                             </div>
                         </div>
-                        <div style="display: flex; justify-content: space-between; font-size: 0.85em; color: #666; margin-bottom: 0.5rem;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.85em; color: var(--text-secondary); margin-bottom: 0.5rem;">
                             <div>${offer.startDate.toLocaleDateString()} - ${offer.endDate.toLocaleDateString()}</div>
                             <div>${offer.expired ? `Expired ${Math.abs(offer.daysUntilExpiration)}d ago` :
                                   offer.notStarted ? `Starts in ${offer.daysUntilExpiration}d` :
                                   `${offer.daysUntilExpiration}d left`}</div>
                         </div>
-                        <div style="font-size: 0.9em; color: #666; margin-bottom: 0.5rem;">${offer.description}</div>
+                        <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 0.5rem;">${offer.description}</div>
                         ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
                         ${transactionsHtml}
                     </div>
@@ -1115,7 +1115,7 @@ class OfferTracker {
             // Determine status and background color
             let statusClass = 'status-active';
             let statusText = 'IN PROGRESS';
-            let bgColor = '#fff';
+            let bgColor = 'var(--bg-secondary)';
 
             if (month.completed) {
                 statusClass = 'status-completed';
@@ -1132,14 +1132,14 @@ class OfferTracker {
             }
 
             return `
-                <div style="flex: 0 1 calc(33.333% - 0.5rem); min-width: 120px; max-width: 200px; padding: 0.5rem; border: 1px solid #dee2e6; border-radius: 5px; margin-right: 0.5rem; margin-bottom: 0.5rem; background: ${bgColor};">
+                <div style="flex: 0 1 calc(33.333% - 0.5rem); min-width: 120px; max-width: 200px; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 5px; margin-right: 0.5rem; margin-bottom: 0.5rem; background: ${bgColor};">
                     <div style="font-size: 0.8em; font-weight: bold; margin-bottom: 0.25rem;">${monthName}</div>
                     <div style="margin-bottom: 0.25rem;">
-                        <div class="offer-progress" style="height: 4px; background: #e9ecef;">
+                        <div class="offer-progress" style="height: 4px; background: var(--progress-bg);">
                             ${progressBar}
                         </div>
                     </div>
-                    <div style="font-size: 0.75em; color: #666; margin-bottom: 0.25rem;">${progressText}</div>
+                    <div style="font-size: 0.75em; color: var(--text-secondary); margin-bottom: 0.25rem;">${progressText}</div>
                     <div style="font-size: 0.7em;">
                         <span class="${statusClass}" style="padding: 0.1rem 0.3rem; font-size: 0.7em;">${statusText}</span>
                     </div>
@@ -1152,7 +1152,7 @@ class OfferTracker {
                 <div style="display: flex; flex-wrap: wrap; margin-bottom: 0.5rem;">
                     ${monthsHtml}
                 </div>
-                <div style="font-size: 0.85em; color: #666;">
+                <div style="font-size: 0.85em; color: var(--text-secondary);">
                     <strong>Completed:</strong> ${progress.totalCompleted} / ${progress.months.length} months
                 </div>
             </div>
@@ -1179,7 +1179,7 @@ class OfferTracker {
                 const isReached = value >= tier.threshold;
                 const isCurrent = !isReached && (idx === 0 || value >= sortedTiers[idx - 1].threshold);
 
-                let bgColor = '#fff';
+                let bgColor = 'var(--bg-secondary)';
                 if (isReached && idx === sortedTiers.length - 1) {
                     bgColor = '#d4edda'; // Green for highest tier reached
                 } else if (isReached) {
@@ -1187,12 +1187,12 @@ class OfferTracker {
                 }
 
                 return `
-                    <div style="margin-bottom: 0.5rem; padding: 0.5rem; border: 1px solid #dee2e6; border-radius: 5px; background: ${bgColor};">
+                    <div style="margin-bottom: 0.5rem; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 5px; background: ${bgColor};">
                         <div style="font-size: 0.85em; margin-bottom: 0.25rem;">
                             <strong>Tier ${idx + 1}:</strong> ${valueLabel ? `${value}/${tier.threshold} ${valueLabel}` : `$${value.toFixed(2)}/$${tier.threshold}`}
                             → <strong>$${tier.reward}</strong> ${isReached ? '✓' : ''}
                         </div>
-                        <div class="offer-progress" style="height: 6px; background: #e9ecef;">
+                        <div class="offer-progress" style="height: 6px; background: var(--progress-bg);">
                             <div class="progress-bar" style="width: ${percentage}%; height: 6px;"></div>
                         </div>
                     </div>
