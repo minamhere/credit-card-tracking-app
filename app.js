@@ -1372,8 +1372,8 @@ class OfferTracker {
                             <div style="font-size: 1.1em; font-weight: bold;">
                                 ${offer.type === 'percent-back' ?
                                     (offer.monthlyTracking && progress.months ?
-                                        `$${(progress.months.reduce((sum, m) => sum + (m.earnedReward || 0), 0) || 0).toFixed(2)} earned` :
-                                        `$${(progress.earnedReward || 0).toFixed(2)} earned`) :
+                                        `$${Number(progress.months.reduce((sum, m) => sum + Number(m.earnedReward || 0), 0)).toFixed(2)} earned` :
+                                        `$${Number(progress.earnedReward || 0).toFixed(2)} earned`) :
                                     (offer.monthlyTracking && progress.months ?
                                         `$${offer.reward || 0}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${((offer.reward || 0) * progress.months.length) + (offer.bonusReward || 0)}` :
                                         `$${offer.reward || 0}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
