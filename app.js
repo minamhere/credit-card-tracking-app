@@ -1079,9 +1079,8 @@ class OfferTracker {
         const today = new Date();
 
         const monthsHtml = progress.months.map(month => {
-            let progressBar = '';
+            let progressBarsHtml = '';
             let progressText = '';
-            let percentage = 0;
 
             // Parse the month to check if it's expired
             const monthParts = month.month.split(' ');
@@ -1091,24 +1090,55 @@ class OfferTracker {
             const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
             const isExpired = monthEnd < today && !month.completed;
 
-            if (offer.type === 'percent-back') {
+            // Handle tiered offers
+            if (offer.tiers && offer.tiers.length > 0) {
+                const sortedTiers = [...offer.tiers].sort((a, b) => a.threshold - b.threshold);
+                const value = offer.type === 'transactions' ? month.transactionCount : month.spending;
+                const valueLabel = offer.type === 'transactions' ? 'txn' : '';
+
+                progressBarsHtml = sortedTiers.map((tier, idx) => {
+                    const percentage = Math.min((value / tier.threshold) * 100, 100);
+                    const isReached = value >= tier.threshold;
+
+                    return `
+                        <div style="margin-bottom: 0.15rem;">
+                            <div style="font-size: 0.65em; color: var(--text-secondary); margin-bottom: 0.1rem;">
+                                T${idx + 1}: ${valueLabel ? `${tier.threshold} ${valueLabel}` : `$${tier.threshold}`} → $${tier.reward} ${isReached ? '✓' : ''}
+                            </div>
+                            <div class="offer-progress" style="height: 3px; background: var(--progress-bg);">
+                                <div class="progress-bar" style="width: ${percentage}%; height: 3px;"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                progressText = valueLabel ? `${value} ${valueLabel}` : `$${value.toFixed(0)}`;
+            } else if (offer.type === 'percent-back') {
                 const earnedReward = Number(month.earnedReward || 0);
                 if (offer.maxBack) {
-                    percentage = Math.min((earnedReward / offer.maxBack) * 100, 100);
-                    progressBar = `<div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>`;
+                    const percentage = Math.min((earnedReward / offer.maxBack) * 100, 100);
+                    progressBarsHtml = `<div class="offer-progress" style="height: 4px; background: var(--progress-bg);">
+                        <div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>
+                    </div>`;
                     progressText = `$${earnedReward.toFixed(2)}/$${offer.maxBack}`;
                 } else {
-                    percentage = month.spending > 0 ? 50 : 0; // Arbitrary progress
-                    progressBar = `<div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>`;
+                    const percentage = month.spending > 0 ? 50 : 0;
+                    progressBarsHtml = `<div class="offer-progress" style="height: 4px; background: var(--progress-bg);">
+                        <div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>
+                    </div>`;
                     progressText = `$${earnedReward.toFixed(2)} (${offer.percentBack}%)`;
                 }
             } else if (offer.type === 'spending' && offer.spendingTarget) {
-                percentage = Math.min((month.spending / offer.spendingTarget) * 100, 100);
-                progressBar = `<div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>`;
+                const percentage = Math.min((month.spending / offer.spendingTarget) * 100, 100);
+                progressBarsHtml = `<div class="offer-progress" style="height: 4px; background: var(--progress-bg);">
+                    <div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>
+                </div>`;
                 progressText = `$${month.spending.toFixed(0)}/$${offer.spendingTarget}`;
             } else if (offer.type === 'transactions' && offer.transactionTarget) {
-                percentage = Math.min((month.transactionCount / offer.transactionTarget) * 100, 100);
-                progressBar = `<div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>`;
+                const percentage = Math.min((month.transactionCount / offer.transactionTarget) * 100, 100);
+                progressBarsHtml = `<div class="offer-progress" style="height: 4px; background: var(--progress-bg);">
+                    <div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>
+                </div>`;
                 progressText = `${month.transactionCount}/${offer.transactionTarget}`;
             }
 
@@ -1135,9 +1165,7 @@ class OfferTracker {
                 <div style="flex: 0 1 calc(33.333% - 0.5rem); min-width: 120px; max-width: 200px; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 5px; margin-right: 0.5rem; margin-bottom: 0.5rem; background: ${bgColor};">
                     <div style="font-size: 0.8em; font-weight: bold; margin-bottom: 0.25rem;">${monthName}</div>
                     <div style="margin-bottom: 0.25rem;">
-                        <div class="offer-progress" style="height: 4px; background: var(--progress-bg);">
-                            ${progressBar}
-                        </div>
+                        ${progressBarsHtml}
                     </div>
                     <div style="font-size: 0.75em; color: var(--text-secondary); margin-bottom: 0.25rem;">${progressText}</div>
                     <div style="font-size: 0.7em;">
