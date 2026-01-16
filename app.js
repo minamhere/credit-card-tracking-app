@@ -1092,7 +1092,7 @@ class OfferTracker {
             const isExpired = monthEnd < today && !month.completed;
 
             if (offer.type === 'percent-back') {
-                const earnedReward = month.earnedReward || 0;
+                const earnedReward = Number(month.earnedReward || 0);
                 if (offer.maxBack) {
                     percentage = Math.min((earnedReward / offer.maxBack) * 100, 100);
                     progressBar = `<div class="progress-bar" style="width: ${percentage}%; height: 4px;"></div>`;
@@ -1207,7 +1207,7 @@ class OfferTracker {
         } else {
             // Non-tiered offers
             if (offer.type === 'percent-back') {
-                const earnedReward = progress.earnedReward || 0;
+                const earnedReward = Number(progress.earnedReward || 0);
                 if (offer.maxBack) {
                     progressText = `$${earnedReward.toFixed(2)} / $${offer.maxBack} max back`;
                 } else {
