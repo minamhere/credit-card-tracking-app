@@ -136,7 +136,11 @@ app.get('/api/offers', async (req, res) => {
       personId: row.person_id,
       percentBack: row.percent_back,
       maxBack: row.max_back,
-      minSpendThreshold: row.min_spend_threshold
+      minSpendThreshold: row.min_spend_threshold,
+      bonusPosted: row.bonus_posted,
+      bonusPostedDate: row.bonus_posted_date,
+      bonusPostedAmount: row.bonus_posted_amount,
+      hidden: row.hidden
     }));
     res.json(offers);
   } catch (err) {
@@ -186,7 +190,11 @@ app.post('/api/offers', async (req, res) => {
       personId: result.rows[0].person_id,
       percentBack: result.rows[0].percent_back,
       maxBack: result.rows[0].max_back,
-      minSpendThreshold: result.rows[0].min_spend_threshold
+      minSpendThreshold: result.rows[0].min_spend_threshold,
+      bonusPosted: result.rows[0].bonus_posted,
+      bonusPostedDate: result.rows[0].bonus_posted_date,
+      bonusPostedAmount: result.rows[0].bonus_posted_amount,
+      hidden: result.rows[0].hidden
     };
 
     res.json(offer);
@@ -242,7 +250,11 @@ app.put('/api/offers/:id', async (req, res) => {
       personId: result.rows[0].person_id,
       percentBack: result.rows[0].percent_back,
       maxBack: result.rows[0].max_back,
-      minSpendThreshold: result.rows[0].min_spend_threshold
+      minSpendThreshold: result.rows[0].min_spend_threshold,
+      bonusPosted: result.rows[0].bonus_posted,
+      bonusPostedDate: result.rows[0].bonus_posted_date,
+      bonusPostedAmount: result.rows[0].bonus_posted_amount,
+      hidden: result.rows[0].hidden
     };
 
     res.json(offer);
@@ -265,6 +277,54 @@ app.delete('/api/offers/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting offer:', err);
     res.status(500).json({ error: 'Failed to delete offer' });
+  }
+});
+
+app.patch('/api/offers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { bonusPosted, bonusPostedDate, bonusPostedAmount, hidden } = req.body;
+
+    const result = await pool.query(`
+      UPDATE offers
+      SET bonus_posted = $1, bonus_posted_date = $2, bonus_posted_amount = $3, hidden = $4
+      WHERE id = $5
+      RETURNING *
+    `, [bonusPosted, bonusPostedDate, bonusPostedAmount, hidden, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Offer not found' });
+    }
+
+    const offer = {
+      id: result.rows[0].id,
+      name: result.rows[0].name,
+      type: result.rows[0].type,
+      startDate: result.rows[0].start_date,
+      endDate: result.rows[0].end_date,
+      spendingTarget: result.rows[0].spending_target,
+      transactionTarget: result.rows[0].transaction_target,
+      minTransaction: result.rows[0].min_transaction,
+      categories: result.rows[0].categories || [],
+      reward: result.rows[0].reward,
+      bonusReward: result.rows[0].bonus_reward,
+      tiers: result.rows[0].tiers || [],
+      description: result.rows[0].description,
+      monthlyTracking: result.rows[0].monthly_tracking,
+      personId: result.rows[0].person_id,
+      percentBack: result.rows[0].percent_back,
+      maxBack: result.rows[0].max_back,
+      minSpendThreshold: result.rows[0].min_spend_threshold,
+      bonusPosted: result.rows[0].bonus_posted,
+      bonusPostedDate: result.rows[0].bonus_posted_date,
+      bonusPostedAmount: result.rows[0].bonus_posted_amount,
+      hidden: result.rows[0].hidden
+    };
+
+    res.json(offer);
+  } catch (err) {
+    console.error('Error updating offer status:', err);
+    res.status(500).json({ error: 'Failed to update offer status' });
   }
 });
 
@@ -295,7 +355,11 @@ app.get('/api/offers/:id', async (req, res) => {
       personId: result.rows[0].person_id,
       percentBack: result.rows[0].percent_back,
       maxBack: result.rows[0].max_back,
-      minSpendThreshold: result.rows[0].min_spend_threshold
+      minSpendThreshold: result.rows[0].min_spend_threshold,
+      bonusPosted: result.rows[0].bonus_posted,
+      bonusPostedDate: result.rows[0].bonus_posted_date,
+      bonusPostedAmount: result.rows[0].bonus_posted_amount,
+      hidden: result.rows[0].hidden
     };
 
     res.json(offer);
