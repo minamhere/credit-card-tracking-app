@@ -956,12 +956,12 @@ class OfferTracker {
                 // Calculate earned amount
                 let earned = 0;
                 if (offer.monthlyTracking && progress.months) {
-                    earned = progress.months.reduce((sum, month) => sum + (month.earnedReward || 0), 0);
+                    earned = Number(progress.months.reduce((sum, month) => sum + Number(month.earnedReward || 0), 0));
                     if (offer.bonusReward && progress.totalCompleted === progress.months.length) {
-                        earned += offer.bonusReward;
+                        earned += Number(offer.bonusReward);
                     }
                 } else if (progress.earnedReward) {
-                    earned = progress.earnedReward;
+                    earned = Number(progress.earnedReward);
                 }
                 totalEarned += earned;
 
@@ -1018,7 +1018,7 @@ class OfferTracker {
                                                 `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
                                         }
                                     </div>
-                                    <div style="font-size: 0.8em; color: #666;">Earned: $${earned.toFixed(2)}</div>
+                                    <div style="font-size: 0.8em; color: #666;">Earned: $${Number(earned).toFixed(2)}</div>
                                 </div>
                             </div>
                             <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
