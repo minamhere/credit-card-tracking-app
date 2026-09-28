@@ -72,6 +72,19 @@
         return -1;
     }
 
+    // Stable non-cryptographic fallback for HTTP deployments where browsers do
+    // not expose crypto.subtle. This fingerprint is for import audit/deduping,
+    // not password or security use.
+    function fingerprintText(text) {
+        let hash = 0x811c9dc5;
+        const value = String(text || '');
+        for (let i = 0; i < value.length; i++) {
+            hash ^= value.charCodeAt(i);
+            hash = Math.imul(hash, 0x01000193);
+        }
+        return `fnv1a32-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+    }
+
     function parseCitiTransactions(text) {
         const firstLine = String(text || '').split(/\r?\n/, 1)[0];
         const isHeaderlessTabExport = firstLine.includes('\t');
@@ -144,5 +157,5 @@
         return { transactions, errors, headers, format: 'citi-column-export' };
     }
 
-    return { parseCsv, parseDelimited, parseMoney, normalizeDate, parseCitiTransactions };
+    return { parseCsv, parseDelimited, parseMoney, normalizeDate, fingerprintText, parseCitiTransactions };
 });

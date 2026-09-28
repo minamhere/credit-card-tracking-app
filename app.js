@@ -397,8 +397,13 @@ class OfferTracker {
             this.setImportMessage('Reading and checking the CSV…');
             const fileText = await file.text();
             const parsed = CitiCsv.parseCitiTransactions(fileText);
-            const hashBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(fileText));
-            const fileHash = Array.from(new Uint8Array(hashBytes)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+            let fileHash;
+            if (globalThis.crypto && globalThis.crypto.subtle) {
+                const hashBytes = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(fileText));
+                fileHash = Array.from(new Uint8Array(hashBytes)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+            } else {
+                fileHash = CitiCsv.fingerprintText(fileText);
+            }
             this.importMetadata = { filename: file.name, fileHash, source: 'citi_csv' };
             const result = await this.dataManager.dbManager.previewTransactionImport(parsed.transactions);
             this.importPreview = result.transactions.map(item => ({

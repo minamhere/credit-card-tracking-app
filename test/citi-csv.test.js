@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseCitiTransactions } = require('../citi-csv');
+const { fingerprintText, parseCitiTransactions } = require('../citi-csv');
 
 test('parses Citi debit and credit columns, quoted merchants, and dates', () => {
     const csv = `Status,Date,Description,Debit,Credit\nCleared,09/21/2026,"GROCERY, MARKET",42.17,\nCleared,09/22/2026,PAYMENT THANK YOU,,100.00\n`;
@@ -33,4 +33,10 @@ test('reports malformed rows without discarding valid rows', () => {
     const result = parseCitiTransactions('Date,Description,Debit\n09/21/2026,STORE,12.50\nbad,,x');
     assert.equal(result.transactions.length, 1);
     assert.equal(result.errors[0].row, 3);
+});
+
+test('creates stable file fingerprints without Web Crypto', () => {
+    assert.equal(fingerprintText('citi export'), fingerprintText('citi export'));
+    assert.notEqual(fingerprintText('citi export'), fingerprintText('different export'));
+    assert.match(fingerprintText('citi export'), /^fnv1a32-[0-9a-f]{8}$/);
 });
