@@ -9,6 +9,7 @@ class OfferTracker {
         this.transactionsPerPage = 20;
         this.importPreview = [];
         this.importMetadata = null;
+        this.pendingOfferImport = null;
         this.init();
     }
 
@@ -338,7 +339,14 @@ class OfferTracker {
         });
 
         document.getElementById('add-offer-btn').addEventListener('click', () => {
+            this.pendingOfferImport = null;
             this.showOfferForm();
+        });
+
+        document.getElementById('parse-offer-email').addEventListener('click', () => this.parseOfferEmail());
+        document.getElementById('clear-offer-email').addEventListener('click', () => {
+            document.getElementById('offer-email-text').value = '';
+            document.getElementById('offer-import-message').textContent = '';
         });
 
         document.getElementById('cancel-offer').addEventListener('click', () => {
@@ -989,7 +997,7 @@ class OfferTracker {
     }
 
     showOfferForm(offer = null) {
-        this.currentEditingOffer = offer;
+        this.currentEditingOffer = offer && offer.id ? offer : null;
         const container = document.getElementById('offer-form-container');
         const form = document.getElementById('offer-form');
 
@@ -1049,6 +1057,26 @@ class OfferTracker {
         document.getElementById('offer-form-container').classList.add('hidden');
         document.getElementById('offer-form').reset();
         this.currentEditingOffer = null;
+        this.pendingOfferImport = null;
+    }
+
+    parseOfferEmail() {
+        const message = document.getElementById('offer-import-message');
+        try {
+            const parsed = OfferEmailParser.parseOfferEmail(document.getElementById('offer-email-text').value);
+            parsed.categories.forEach(category => this.addCategory(category));
+            parsed.excludeCategories.forEach(category => this.addCategory(category));
+            this.pendingOfferImport = parsed;
+            this.showOfferForm(parsed);
+            const ownerText = parsed.ownerName ? ` Cardholder found: ${parsed.ownerName}.` : '';
+            const warningText = parsed.warnings.length ? ` Review: ${parsed.warnings.join(' ')}` : '';
+            message.textContent = `Offer terms parsed.${ownerText}${warningText}`;
+            message.className = `import-message ${parsed.warnings.length ? 'error' : 'success'}`;
+            document.getElementById('offer-form-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch (error) {
+            message.textContent = error.message || 'Could not parse the offer email.';
+            message.className = 'import-message error';
+        }
     }
 
     async saveOffer() {
@@ -1116,6 +1144,20 @@ class OfferTracker {
             monthlyTracking: document.getElementById('offer-monthly-tracking').checked,
             personId: parseInt(personId)
         };
+
+        const previousEligibility = this.currentEditingOffer && this.currentEditingOffer.eligibility;
+        offerData.eligibility = {
+            transactionTypes: ['purchase'],
+            includeCategories: categories,
+            excludeCategories: this.pendingOfferImport ? this.pendingOfferImport.excludeCategories : (previousEligibility?.excludeCategories || []),
+            includeMerchants: previousEligibility?.includeMerchants || [],
+            excludeMerchants: previousEligibility?.excludeMerchants || [],
+            minimumAmount: offerData.minTransaction,
+            maximumAmount: previousEligibility?.maximumAmount || null
+        };
+        offerData.sourceType = this.pendingOfferImport ? 'pasted_email' : (this.currentEditingOffer?.sourceType || 'manual');
+        offerData.sourceMetadata = this.pendingOfferImport ? this.pendingOfferImport.sourceMetadata : (this.currentEditingOffer?.sourceMetadata || {});
+        offerData.reviewStatus = 'confirmed';
 
         if (this.currentEditingOffer) {
             await this.dataManager.updateOffer(this.currentEditingOffer.id, offerData);

@@ -96,6 +96,10 @@ function serializeOffer(row, credits = []) {
     bonusPostedDate: row.bonus_posted_date,
     bonusPostedAmount: row.bonus_posted_amount,
     hidden: row.hidden,
+    sourceType: row.source_type || 'manual',
+    sourceExternalId: row.source_external_id,
+    sourceMetadata: row.source_metadata || {},
+    reviewStatus: row.review_status || 'confirmed',
     credits
   };
   const normalized = OfferEngine.normalizeOffer({
@@ -241,7 +245,7 @@ app.post('/api/offers', async (req, res) => {
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
       minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId,
-      percentBack, maxBack, minSpendThreshold
+      percentBack, maxBack, minSpendThreshold, sourceType, sourceExternalId, sourceMetadata, reviewStatus
     } = req.body;
 
     const result = await pool.query(`
@@ -249,15 +253,17 @@ app.post('/api/offers', async (req, res) => {
         name, type, start_date, end_date, spending_target,
         transaction_target, min_transaction, categories, reward,
         bonus_reward, tiers, description, monthly_tracking, person_id,
-        percent_back, max_back, min_spend_threshold, eligibility, measurement, reward_config
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        percent_back, max_back, min_spend_threshold, eligibility, measurement, reward_config,
+        source_type, source_external_id, source_metadata, review_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
       transactionTarget, minTransaction, categories || [], reward,
       bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId,
       percentBack, maxBack, minSpendThreshold,
-      JSON.stringify(configs.eligibility), JSON.stringify(configs.measurement), JSON.stringify(configs.rewardConfig)
+      JSON.stringify(configs.eligibility), JSON.stringify(configs.measurement), JSON.stringify(configs.rewardConfig),
+      sourceType || 'manual', sourceExternalId || null, JSON.stringify(sourceMetadata || {}), reviewStatus || 'confirmed'
     ]);
 
     const offer = serializeOffer(result.rows[0]);
@@ -276,7 +282,7 @@ app.put('/api/offers/:id', async (req, res) => {
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
       minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId,
-      percentBack, maxBack, minSpendThreshold
+      percentBack, maxBack, minSpendThreshold, sourceType, sourceExternalId, sourceMetadata, reviewStatus
     } = req.body;
 
     const result = await pool.query(`
@@ -285,15 +291,17 @@ app.put('/api/offers/:id', async (req, res) => {
         spending_target = $5, transaction_target = $6, min_transaction = $7,
         categories = $8, reward = $9, bonus_reward = $10, tiers = $11, description = $12,
         monthly_tracking = $13, person_id = $14, percent_back = $15, max_back = $16, min_spend_threshold = $17,
-        eligibility = $18, measurement = $19, reward_config = $20, engine_version = 2
-      WHERE id = $21
+        eligibility = $18, measurement = $19, reward_config = $20, engine_version = 2,
+        source_type = $21, source_external_id = $22, source_metadata = $23, review_status = $24
+      WHERE id = $25
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
       transactionTarget, minTransaction, categories || [], reward,
       bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId,
       percentBack, maxBack, minSpendThreshold,
-      JSON.stringify(configs.eligibility), JSON.stringify(configs.measurement), JSON.stringify(configs.rewardConfig), id
+      JSON.stringify(configs.eligibility), JSON.stringify(configs.measurement), JSON.stringify(configs.rewardConfig),
+      sourceType || 'manual', sourceExternalId || null, JSON.stringify(sourceMetadata || {}), reviewStatus || 'confirmed', id
     ]);
 
     if (result.rows.length === 0) {

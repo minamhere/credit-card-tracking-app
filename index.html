@@ -171,7 +171,17 @@
             <!-- Offers Tab -->
             <div id="offers" class="tab-content">
                 <h2>Manage Offers</h2>
-                <button id="add-offer-btn" class="btn-primary">Add New Offer</button>
+                <section class="offer-import-panel">
+                    <h3>Import an offer email</h3>
+                    <p>Paste the Citi email text. The extracted terms will open in the offer editor for review before saving.</p>
+                    <textarea id="offer-email-text" rows="6" placeholder="Paste the complete Citi offer email here…"></textarea>
+                    <div class="form-buttons">
+                        <button type="button" id="parse-offer-email" class="btn-primary">Parse offer email</button>
+                        <button type="button" id="clear-offer-email" class="btn-secondary">Clear</button>
+                    </div>
+                    <div id="offer-import-message" class="import-message" aria-live="polite"></div>
+                </section>
+                <button id="add-offer-btn" class="btn-primary">Add Offer Manually</button>
 
                 <div id="offer-form-container" class="hidden">
                     <h3>Add/Edit Offer</h3>
@@ -295,6 +305,7 @@
     </div>
 
     <script src="citi-csv.js"></script>
+    <script src="offer-email-parser.js"></script>
     <script src="offer-engine.js"></script>
     <script src="database.js"></script>
     <script src="data-manager.js"></script>
