@@ -117,3 +117,33 @@ BEGIN
             FOREIGN KEY (import_batch_id) REFERENCES import_batches(id) ON DELETE SET NULL;
     END IF;
 END $$;
+
+-- One-time clean slate requested for the redesigned importer. Keep the people
+-- records so the existing cardholder selection remains usable, but remove all
+-- offer, transaction, import, credit, and merchant-classification data. The
+-- marker lives in the persistent database volume, so container restarts and
+-- rebuilds cannot accidentally run this reset again.
+CREATE TABLE IF NOT EXISTS app_migration_history (
+    migration_key TEXT PRIMARY KEY,
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM app_migration_history
+        WHERE migration_key = 'one_time_clean_reset_2026_09_27'
+    ) THEN
+        TRUNCATE TABLE
+            account_events,
+            offer_credits,
+            import_batches,
+            merchant_category_rules,
+            transactions,
+            offers
+        RESTART IDENTITY CASCADE;
+
+        INSERT INTO app_migration_history (migration_key)
+        VALUES ('one_time_clean_reset_2026_09_27');
+    END IF;
+END $$;
