@@ -69,6 +69,10 @@ ALTER TABLE offers ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 
 CREATE UNIQUE INDEX IF NOT EXISTS offers_source_external_id_idx
     ON offers (source_type, source_external_id)
     WHERE source_external_id IS NOT NULL;
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS offer_fingerprint TEXT;
+CREATE INDEX IF NOT EXISTS offers_person_fingerprint_idx
+    ON offers (person_id, offer_fingerprint)
+    WHERE offer_fingerprint IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS offer_credits (
     id SERIAL PRIMARY KEY,

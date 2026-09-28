@@ -15,6 +15,43 @@
         return [...new Set(values.filter(Boolean))];
     }
 
+    function fingerprintValue(value) {
+        let hash = 0x811c9dc5;
+        const text = String(value || '');
+        for (let i = 0; i < text.length; i++) {
+            hash ^= text.charCodeAt(i);
+            hash = Math.imul(hash, 0x01000193);
+        }
+        return `offer-v1-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+    }
+
+    function offerFingerprint(offer) {
+        const dateOnly = value => {
+            if (!value) return null;
+            if (value instanceof Date) return value.toISOString().slice(0, 10);
+            return String(value).slice(0, 10);
+        };
+        const canonical = {
+            startDate: dateOnly(offer.startDate),
+            endDate: dateOnly(offer.endDate),
+            type: offer.type || null,
+            monthlyTracking: Boolean(offer.monthlyTracking),
+            categories: [...(offer.categories || [])].sort(),
+            excludeCategories: [...(offer.excludeCategories || [])].sort(),
+            percentBack: offer.percentBack == null ? null : Number(offer.percentBack),
+            maxBack: offer.maxBack == null ? null : Number(offer.maxBack),
+            minSpendThreshold: offer.minSpendThreshold == null ? null : Number(offer.minSpendThreshold),
+            spendingTarget: offer.spendingTarget == null ? null : Number(offer.spendingTarget),
+            transactionTarget: offer.transactionTarget == null ? null : Number(offer.transactionTarget),
+            reward: offer.reward == null ? null : Number(offer.reward),
+            bonusReward: offer.bonusReward == null ? null : Number(offer.bonusReward),
+            tiers: [...(offer.tiers || [])]
+                .map(tier => ({ threshold: Number(tier.threshold), reward: Number(tier.reward) }))
+                .sort((a, b) => a.threshold - b.threshold)
+        };
+        return fingerprintValue(JSON.stringify(canonical));
+    }
+
     function parseTiers(text) {
         const tiers = [];
         const patterns = [
@@ -89,7 +126,7 @@
             warnings.length ? warnings.join(' ') : null
         ].filter(Boolean);
 
-        return {
+        const parsed = {
             name: `${rate != null ? `${rate}%` : 'Tiered'} ${categoryLabel}`,
             type,
             startDate,
@@ -117,7 +154,9 @@
                 activationDateRequired: warnings.some(warning => warning.includes('activation date'))
             }
         };
+        parsed.fingerprint = offerFingerprint(parsed);
+        return parsed;
     }
 
-    return { parseOfferEmail, parseTiers, isoDate };
+    return { parseOfferEmail, parseTiers, isoDate, offerFingerprint };
 });

@@ -10,6 +10,7 @@ class OfferTracker {
         this.importPreview = [];
         this.importMetadata = null;
         this.pendingOfferImport = null;
+        this.pendingOfferDuplicate = null;
         this.init();
     }
 
@@ -340,6 +341,8 @@ class OfferTracker {
 
         document.getElementById('add-offer-btn').addEventListener('click', () => {
             this.pendingOfferImport = null;
+            this.pendingOfferDuplicate = null;
+            document.getElementById('offer-duplicate-warning').classList.add('hidden');
             this.showOfferForm();
         });
 
@@ -1058,20 +1061,33 @@ class OfferTracker {
         document.getElementById('offer-form').reset();
         this.currentEditingOffer = null;
         this.pendingOfferImport = null;
+        this.pendingOfferDuplicate = null;
+        document.getElementById('offer-duplicate-warning').classList.add('hidden');
     }
 
-    parseOfferEmail() {
+    async parseOfferEmail() {
         const message = document.getElementById('offer-import-message');
         try {
             const parsed = OfferEmailParser.parseOfferEmail(document.getElementById('offer-email-text').value);
             parsed.categories.forEach(category => this.addCategory(category));
             parsed.excludeCategories.forEach(category => this.addCategory(category));
             this.pendingOfferImport = parsed;
+            const duplicateResult = await this.dataManager.dbManager.checkOfferDuplicate(parsed.fingerprint);
+            this.pendingOfferDuplicate = duplicateResult.duplicate ? duplicateResult.offer : null;
+            const duplicateWarning = document.getElementById('offer-duplicate-warning');
+            document.getElementById('force-offer-duplicate').checked = false;
+            if (duplicateResult.duplicate) {
+                const existing = duplicateResult.offer;
+                document.getElementById('offer-duplicate-details').textContent = ` Existing: ${existing.name} (${existing.startDate}–${existing.endDate}).`;
+                duplicateWarning.classList.remove('hidden');
+            } else {
+                duplicateWarning.classList.add('hidden');
+            }
             this.showOfferForm(parsed);
             const ownerText = parsed.ownerName ? ` Cardholder found: ${parsed.ownerName}.` : '';
             const warningText = parsed.warnings.length ? ` Review: ${parsed.warnings.join(' ')}` : '';
-            message.textContent = `Offer terms parsed.${ownerText}${warningText}`;
-            message.className = `import-message ${parsed.warnings.length ? 'error' : 'success'}`;
+            message.textContent = `${duplicateResult.duplicate ? 'Duplicate offer detected; saving is blocked unless force import is selected.' : 'Offer terms parsed.'}${ownerText}${warningText}`;
+            message.className = `import-message ${duplicateResult.duplicate || parsed.warnings.length ? 'error' : 'success'}`;
             document.getElementById('offer-form-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
         } catch (error) {
             message.textContent = error.message || 'Could not parse the offer email.';
@@ -1125,6 +1141,12 @@ class OfferTracker {
             return;
         }
 
+        const forceAllowDuplicate = Boolean(this.pendingOfferDuplicate && document.getElementById('force-offer-duplicate').checked);
+        if (this.pendingOfferDuplicate && !forceAllowDuplicate) {
+            alert('This offer was already imported. Check “Force import duplicate” if you intentionally want another copy.');
+            return;
+        }
+
         const offerData = {
             name: formData.get('offer-name') || document.getElementById('offer-name').value,
             type: formData.get('offer-type') || document.getElementById('offer-type').value,
@@ -1158,6 +1180,8 @@ class OfferTracker {
         offerData.sourceType = this.pendingOfferImport ? 'pasted_email' : (this.currentEditingOffer?.sourceType || 'manual');
         offerData.sourceMetadata = this.pendingOfferImport ? this.pendingOfferImport.sourceMetadata : (this.currentEditingOffer?.sourceMetadata || {});
         offerData.reviewStatus = 'confirmed';
+        offerData.offerFingerprint = this.pendingOfferImport ? this.pendingOfferImport.fingerprint : (this.currentEditingOffer?.offerFingerprint || null);
+        offerData.forceAllowDuplicate = forceAllowDuplicate;
 
         if (this.currentEditingOffer) {
             await this.dataManager.updateOffer(this.currentEditingOffer.id, offerData);

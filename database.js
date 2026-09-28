@@ -151,7 +151,8 @@ class DatabaseManager {
             });
 
             if (!response.ok) {
-                throw new Error('Failed to add offer');
+                const result = await response.json().catch(() => ({}));
+                throw new Error(result.error || 'Failed to add offer');
             }
 
             return await response.json();
@@ -159,6 +160,13 @@ class DatabaseManager {
             console.error('Error adding offer:', error);
             throw error;
         }
+    }
+
+    async checkOfferDuplicate(fingerprint) {
+        const params = new URLSearchParams({ personId: this.currentPersonId, fingerprint });
+        const response = await fetch(`${this.baseUrl}/api/offers/check-duplicate?${params}`);
+        if (!response.ok) throw new Error('Failed to check for duplicate offer');
+        return response.json();
     }
 
     async updateOffer(id, offerData) {

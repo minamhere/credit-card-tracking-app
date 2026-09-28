@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseOfferEmail } = require('../offer-email-parser');
+const { offerFingerprint, parseOfferEmail } = require('../offer-email-parser');
 
 test('parses Citi monthly retail percentage offer', () => {
     const result = parseOfferEmail(`
@@ -65,4 +65,11 @@ test('parses broad monthly percentage offer without mistaking base points for of
     assert.equal(result.startDate, '2026-08-01');
     assert.equal(result.endDate, '2026-10-31');
     assert.equal(result.warnings.length, 1);
+});
+
+test('fingerprints repeated lifecycle emails as the same offer', () => {
+    const invitation = parseOfferEmail(`Earn 8% back (up to $90 each month) on eligible purchases. Spend $900 or more each month from 8/1/2026 (or the date you activate this offer, whichever is later) through 10/31/2026. Account ending in: 1886`);
+    const progress = parseOfferEmail(`Earn 8% back in statement credits (up to $90 each month) on eligible purchases. You have activated. Spend $900 or more each month from 8/1/2026 (or the date you activated this offer, whichever is later) through 10/31/2026. Account ending in: 1886`);
+    assert.equal(invitation.fingerprint, progress.fingerprint);
+    assert.equal(invitation.fingerprint, offerFingerprint(progress));
 });

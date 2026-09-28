@@ -180,6 +180,11 @@
                         <button type="button" id="clear-offer-email" class="btn-secondary">Clear</button>
                     </div>
                     <div id="offer-import-message" class="import-message" aria-live="polite"></div>
+                    <div id="offer-duplicate-warning" class="offer-duplicate-warning hidden">
+                        <strong>This offer was already imported.</strong>
+                        <span id="offer-duplicate-details"></span>
+                        <label><input type="checkbox" id="force-offer-duplicate"> Force import duplicate</label>
+                    </div>
                 </section>
                 <button id="add-offer-btn" class="btn-primary">Add Offer Manually</button>
 

@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const crypto = require('crypto');
 const OfferEngine = require('./offer-engine');
+const OfferEmailParser = require('./offer-email-parser');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -100,6 +101,7 @@ function serializeOffer(row, credits = []) {
     sourceExternalId: row.source_external_id,
     sourceMetadata: row.source_metadata || {},
     reviewStatus: row.review_status || 'confirmed',
+    offerFingerprint: row.offer_fingerprint,
     credits
   };
   const normalized = OfferEngine.normalizeOffer({
@@ -124,6 +126,27 @@ function configsForOffer(input) {
     measurement: normalized.measurement,
     rewardConfig: normalized.rewardConfig
   };
+}
+
+function fingerprintForStoredOffer(row) {
+  const offer = serializeOffer(row);
+  return OfferEmailParser.offerFingerprint({
+    ...offer,
+    excludeCategories: offer.eligibility.excludeCategories || []
+  });
+}
+
+async function findDuplicateOffer(personId, fingerprint) {
+  const exact = await pool.query(
+    'SELECT * FROM offers WHERE person_id = $1 AND offer_fingerprint = $2 LIMIT 1',
+    [personId, fingerprint]
+  );
+  if (exact.rows.length) return exact.rows[0];
+
+  // Offers created before fingerprints were introduced still need to block a
+  // repeated email, so derive their identity from their saved terms.
+  const existing = await pool.query('SELECT * FROM offers WHERE person_id = $1', [personId]);
+  return existing.rows.find(row => fingerprintForStoredOffer(row) === fingerprint) || null;
 }
 
 // Run migrations on startup
@@ -239,14 +262,45 @@ app.get('/api/offers', async (req, res) => {
   }
 });
 
+app.get('/api/offers/check-duplicate', async (req, res) => {
+  try {
+    const { personId, fingerprint } = req.query;
+    if (!personId || !fingerprint) return res.status(400).json({ error: 'personId and fingerprint are required' });
+    const duplicate = await findDuplicateOffer(personId, fingerprint);
+    res.json({
+      duplicate: Boolean(duplicate),
+      offer: duplicate ? {
+        id: duplicate.id,
+        name: duplicate.name,
+        startDate: duplicate.start_date,
+        endDate: duplicate.end_date
+      } : null
+    });
+  } catch (err) {
+    console.error('Error checking duplicate offer:', err);
+    res.status(500).json({ error: 'Failed to check duplicate offer' });
+  }
+});
+
 app.post('/api/offers', async (req, res) => {
   try {
     const configs = configsForOffer(req.body);
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
       minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId,
-      percentBack, maxBack, minSpendThreshold, sourceType, sourceExternalId, sourceMetadata, reviewStatus
+      percentBack, maxBack, minSpendThreshold, sourceType, sourceExternalId, sourceMetadata, reviewStatus,
+      offerFingerprint, forceAllowDuplicate
     } = req.body;
+
+    if (offerFingerprint && !forceAllowDuplicate) {
+      const duplicate = await findDuplicateOffer(personId, offerFingerprint);
+      if (duplicate) {
+        return res.status(409).json({
+          error: 'This offer was already imported.',
+          duplicateOffer: { id: duplicate.id, name: duplicate.name }
+        });
+      }
+    }
 
     const result = await pool.query(`
       INSERT INTO offers (
@@ -254,8 +308,8 @@ app.post('/api/offers', async (req, res) => {
         transaction_target, min_transaction, categories, reward,
         bonus_reward, tiers, description, monthly_tracking, person_id,
         percent_back, max_back, min_spend_threshold, eligibility, measurement, reward_config,
-        source_type, source_external_id, source_metadata, review_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+        source_type, source_external_id, source_metadata, review_status, offer_fingerprint
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
@@ -263,7 +317,8 @@ app.post('/api/offers', async (req, res) => {
       bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId,
       percentBack, maxBack, minSpendThreshold,
       JSON.stringify(configs.eligibility), JSON.stringify(configs.measurement), JSON.stringify(configs.rewardConfig),
-      sourceType || 'manual', sourceExternalId || null, JSON.stringify(sourceMetadata || {}), reviewStatus || 'confirmed'
+      sourceType || 'manual', sourceExternalId || null, JSON.stringify(sourceMetadata || {}), reviewStatus || 'confirmed',
+      offerFingerprint || null
     ]);
 
     const offer = serializeOffer(result.rows[0]);
@@ -282,7 +337,8 @@ app.put('/api/offers/:id', async (req, res) => {
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
       minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId,
-      percentBack, maxBack, minSpendThreshold, sourceType, sourceExternalId, sourceMetadata, reviewStatus
+      percentBack, maxBack, minSpendThreshold, sourceType, sourceExternalId, sourceMetadata, reviewStatus,
+      offerFingerprint
     } = req.body;
 
     const result = await pool.query(`
@@ -292,8 +348,9 @@ app.put('/api/offers/:id', async (req, res) => {
         categories = $8, reward = $9, bonus_reward = $10, tiers = $11, description = $12,
         monthly_tracking = $13, person_id = $14, percent_back = $15, max_back = $16, min_spend_threshold = $17,
         eligibility = $18, measurement = $19, reward_config = $20, engine_version = 2,
-        source_type = $21, source_external_id = $22, source_metadata = $23, review_status = $24
-      WHERE id = $25
+        source_type = $21, source_external_id = $22, source_metadata = $23, review_status = $24,
+        offer_fingerprint = $25
+      WHERE id = $26
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
@@ -301,7 +358,8 @@ app.put('/api/offers/:id', async (req, res) => {
       bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId,
       percentBack, maxBack, minSpendThreshold,
       JSON.stringify(configs.eligibility), JSON.stringify(configs.measurement), JSON.stringify(configs.rewardConfig),
-      sourceType || 'manual', sourceExternalId || null, JSON.stringify(sourceMetadata || {}), reviewStatus || 'confirmed', id
+      sourceType || 'manual', sourceExternalId || null, JSON.stringify(sourceMetadata || {}), reviewStatus || 'confirmed',
+      offerFingerprint || null, id
     ]);
 
     if (result.rows.length === 0) {
