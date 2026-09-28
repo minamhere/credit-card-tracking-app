@@ -1099,6 +1099,21 @@ button:hover {
 }
 .offer-duplicate-warning label { display: block; margin-top: 0.5rem; font-weight: 600; }
 
+.credit-reconciliation {
+    margin: 0.65rem 0;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    font-size: 0.84rem;
+}
+.credit-reconciliation-matched { background: #d4edda; border-color: #8fd19e; color: #155724; }
+.credit-reconciliation-pending { background: #fff3cd; border-color: #e3ca78; color: #856404; }
+.credit-reconciliation-mismatch { background: #f8d7da; border-color: #e5a2a9; color: #721c24; }
+.credit-reconciliation details { margin-top: 0.4rem; }
+.credit-reconciliation summary { cursor: pointer; font-weight: 600; }
+.reconciliation-transaction { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.25rem 0; border-bottom: 1px solid rgba(0, 0, 0, 0.12); }
+.reconciliation-transaction .btn-secondary { flex: 0 0 auto; margin: 0; padding: 0.15rem 0.4rem; font-size: 0.72rem; }
+
 .section-heading {
     display: flex;
     justify-content: space-between;

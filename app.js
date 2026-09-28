@@ -1300,6 +1300,24 @@ class OfferTracker {
                     </div>
                 ` : '<div style="margin-top: 0.75rem; padding: 0.5rem; background: #fff3cd; border-radius: 5px; color: #856404; font-size: 0.85em;"><em>No qualifying transactions yet</em></div>';
 
+                const reconciliation = progress.reconciliation;
+                const reviewRows = reconciliation && reconciliation.status === 'mismatch'
+                    ? [...(reconciliation.reviewExcludedTransactions || []), ...(reconciliation.reviewEligibleTransactions || [])].slice(0, 10)
+                    : [];
+                const reconciliationHtml = reconciliation && reconciliation.status !== 'none' ? `
+                    <div class="credit-reconciliation credit-reconciliation-${reconciliation.status}">
+                        <strong>${reconciliation.status === 'matched' ? '✓ Credit matches' : reconciliation.status === 'mismatch' ? '⚠ Credit/category review needed' : '⏳ Credit reconciliation pending'}</strong>
+                        <div>${this.escapeHtml(reconciliation.message)}</div>
+                        ${reconciliation.impliedQualifyingSpend != null ? `<div>Posted credit implies about <strong>$${Number(reconciliation.impliedQualifyingSpend).toFixed(2)}</strong> of qualifying spend; currently categorized: <strong>$${Number(reconciliation.categorizedQualifyingSpend).toFixed(2)}</strong>.</div>` : ''}
+                        ${reviewRows.length ? `
+                            <details>
+                                <summary>Transactions to review</summary>
+                                ${reviewRows.map(transaction => `<div class="reconciliation-transaction"><span>${this.escapeHtml(transaction.date)} · ${this.escapeHtml(transaction.merchant)} · $${Number(transaction.amount).toFixed(2)} · ${this.escapeHtml((transaction.categories || []).join(', ') || 'uncategorized')}${transaction.exclusionReasons ? ` (${this.escapeHtml(transaction.exclusionReasons.join(', '))})` : ''}</span>${transaction.id ? `<button class="btn-secondary" onclick="tracker.editTransaction(${Number(transaction.id)})">Edit categories</button>` : ''}</div>`).join('')}
+                            </details>
+                        ` : ''}
+                    </div>
+                ` : '';
+
                 return `
                     <div class="offer-card">
                         <div style="margin-bottom: 0.5rem;">
@@ -1337,6 +1355,7 @@ class OfferTracker {
                                   `${offer.daysUntilExpiration}d left`}</div>
                         </div>
                         <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 0.5rem;">${offer.description}</div>
+                        ${reconciliationHtml}
                         ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
                         ${transactionsHtml}
                         <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); display: flex; gap: 0.5rem; flex-wrap: wrap;">

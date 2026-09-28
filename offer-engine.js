@@ -140,6 +140,48 @@
         return { spending, transactionCount: count, metric, ...calculateReward(metric, offer.rewardConfig) };
     }
 
+    function endOfMonthAfter(dateText, count) {
+        const [year, month] = dateOnly(dateText).split('-').map(Number);
+        return new Date(Date.UTC(year, month - 1 + count + 1, 0)).toISOString().slice(0, 10);
+    }
+
+    function reconcileCredits(offer, expectedReward, postedCredits, matureExpected, eligibleTransactions, excludedTransactions) {
+        const tolerance = 0.02;
+        const difference = roundMoney(postedCredits - expectedReward);
+        let status = 'pending';
+        let message = expectedReward > 0
+            ? 'Waiting for the remaining statement credit or for the posting window to close.'
+            : 'No earned credit is expected from the transactions currently categorized as eligible.';
+
+        if (postedCredits > expectedReward + tolerance) {
+            status = 'mismatch';
+            message = `Posted credits exceed the categorized expectation by $${Math.abs(difference).toFixed(2)}.`;
+        } else if (postedCredits + tolerance < matureExpected) {
+            status = 'mismatch';
+            message = `Posted credits are $${roundMoney(matureExpected - postedCredits).toFixed(2)} below the amount whose posting window has closed.`;
+        } else if (expectedReward > 0 && Math.abs(difference) <= tolerance) {
+            status = 'matched';
+            message = 'Posted credits match the reward expected from the categorized purchases.';
+        } else if (postedCredits === 0 && expectedReward === 0) {
+            status = 'none';
+            message = 'No credit is currently expected or posted.';
+        }
+
+        const rate = offer.rewardConfig.kind === 'percentage' ? Number(offer.rewardConfig.rate || 0) : 0;
+        return {
+            status,
+            expected: expectedReward,
+            matureExpected: roundMoney(matureExpected),
+            posted: postedCredits,
+            difference,
+            message,
+            impliedQualifyingSpend: rate > 0 && postedCredits > 0 ? roundMoney(postedCredits / (rate / 100)) : null,
+            categorizedQualifyingSpend: roundMoney(eligibleTransactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0)),
+            reviewEligibleTransactions: status === 'mismatch' ? eligibleTransactions : [],
+            reviewExcludedTransactions: status === 'mismatch' ? excludedTransactions : []
+        };
+    }
+
     function calculateOfferProgress(rawOffer, transactions, options = {}) {
         const offer = normalizeOffer(rawOffer);
         const asOf = dateOnly(options.asOf || new Date().toISOString());
@@ -163,11 +205,16 @@
                 });
                 months.push({
                     month: cursor.toLocaleString('default', { month: 'long', year: 'numeric' }),
+                    periodStart: dateOnly(new Date(year, month, 1, 12).toISOString()),
+                    periodEnd: dateOnly(new Date(year, month + 1, 0, 12).toISOString()),
                     ...evaluatePeriod(monthTransactions, offer)
                 });
                 cursor.setMonth(cursor.getMonth() + 1);
             }
             const expectedReward = roundMoney(months.reduce((sum, month) => sum + month.earnedReward, 0));
+            const matureExpected = roundMoney(months
+                .filter(month => endOfMonthAfter(month.periodEnd, 2) <= asOf)
+                .reduce((sum, month) => sum + month.earnedReward, 0));
             return {
                 status,
                 months,
@@ -178,12 +225,14 @@
                 expectedReward,
                 postedCredits,
                 outstandingReward: roundMoney(Math.max(expectedReward - postedCredits, 0)),
+                reconciliation: reconcileCredits(offer, expectedReward, postedCredits, matureExpected, eligibleTransactions, excludedTransactions),
                 eligibleTransactions,
                 excludedTransactions
             };
         }
 
         const period = evaluatePeriod(eligibleTransactions, offer);
+        const matureExpected = endOfMonthAfter(offer.endDate, 2) <= asOf ? period.earnedReward : 0;
         return {
             status,
             ...period,
@@ -192,6 +241,7 @@
             expectedReward: period.earnedReward,
             postedCredits,
             outstandingReward: roundMoney(Math.max(period.earnedReward - postedCredits, 0)),
+            reconciliation: reconcileCredits(offer, period.earnedReward, postedCredits, matureExpected, eligibleTransactions, excludedTransactions),
             eligibleTransactions,
             excludedTransactions
         };

@@ -22,6 +22,33 @@ test('percentage offer applies activation threshold and reward cap', () => {
     assert.equal(result.postedCredits, 90);
     assert.equal(result.outstandingReward, 0);
     assert.equal(result.completed, true);
+    assert.equal(result.reconciliation.status, 'matched');
+});
+
+test('keeps a partial current-period percentage credit pending', () => {
+    const offer = {
+        startDate: '2026-09-01', endDate: '2026-09-30',
+        eligibility: { transactionTypes: ['purchase'], includeCategories: [] },
+        measurement: { kind: 'spend', period: 'monthly' },
+        rewardConfig: { kind: 'percentage', rate: 8, activationThreshold: 900, cap: 90 },
+        credits: [{ amount: 75.29, postedDate: '2026-09-12' }]
+    };
+    const result = engine.calculateOfferProgress(offer, transactions, { asOf: '2026-09-27' });
+    assert.equal(result.reconciliation.status, 'pending');
+    assert.equal(result.reconciliation.impliedQualifyingSpend, 941.13);
+});
+
+test('flags a short credit after the posting window closes', () => {
+    const offer = {
+        startDate: '2026-09-01', endDate: '2026-09-30',
+        eligibility: { transactionTypes: ['purchase'], includeCategories: [] },
+        measurement: { kind: 'spend', period: 'monthly' },
+        rewardConfig: { kind: 'percentage', rate: 8, activationThreshold: 900, cap: 90 },
+        credits: [{ amount: 75.29, postedDate: '2026-09-12' }]
+    };
+    const result = engine.calculateOfferProgress(offer, transactions, { asOf: '2026-12-01' });
+    assert.equal(result.reconciliation.status, 'mismatch');
+    assert.equal(result.reconciliation.matureExpected, 90);
 });
 
 test('tier offer includes selected categories and excludes entertainment', () => {
