@@ -101,6 +101,29 @@
 
             <!-- Transactions Tab -->
             <div id="transactions" class="tab-content">
+                <section class="import-panel">
+                    <div class="section-heading">
+                        <div>
+                            <h2>Import Citi Transactions</h2>
+                            <p>Upload the CSV downloaded from Citi. Nothing is saved until you review and confirm.</p>
+                        </div>
+                        <label class="file-picker btn-primary">
+                            Choose Citi CSV
+                            <input type="file" id="citi-csv-file" accept=".csv,.xls,text/csv,text/tab-separated-values">
+                        </label>
+                    </div>
+                    <div id="csv-import-message" class="import-message" aria-live="polite"></div>
+                    <div id="csv-import-preview" class="hidden"></div>
+                    <details id="merchant-rules-panel">
+                        <summary>Saved merchant category rules</summary>
+                        <div id="merchant-rules-list"></div>
+                    </details>
+                    <details id="account-events-panel">
+                        <summary>Imported statement credits and account events</summary>
+                        <div id="account-events-list"></div>
+                    </details>
+                </section>
+
                 <h2>Add Transaction</h2>
                 <form id="transaction-form">
                     <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
@@ -271,6 +294,8 @@
         </main>
     </div>
 
+    <script src="citi-csv.js"></script>
+    <script src="offer-engine.js"></script>
     <script src="database.js"></script>
     <script src="data-manager.js"></script>
     <script src="app.js"></script>

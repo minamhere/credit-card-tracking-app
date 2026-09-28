@@ -4,6 +4,12 @@ A web application to track credit card spending offers and bonus qualifications 
 
 ## Features
 
+- **Citi CSV transaction import** with a review step before anything is saved
+- **Duplicate protection** based on card holder, date, amount, and Citi merchant description
+- **Merchant category rules** that automatically classify future purchases into one or more bonus categories
+- **Shared Citi merchant mappings** for known grocery, gas, restaurant, retail, entertainment, and transportation merchants
+- **Automatic bonus progress** using the same multi-category matching as manually entered transactions
+
 - **Multi-User Support**: Track offers and transactions for multiple cardholders
 - **Dashboard**: Visual progress tracking for all active offers
 - **Transaction Management**: Add, view, and delete transactions

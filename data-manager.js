@@ -101,6 +101,10 @@ class DataManager {
 
     // Helper function to determine which tier is reached based on spending/transactions
     getTierReached(offer, spending, transactionCount) {
+        const normalized = OfferEngine.normalizeOffer(offer);
+        const metric = normalized.measurement.kind === 'count' ? transactionCount : spending;
+        return OfferEngine.calculateReward(metric, normalized.rewardConfig).tierReached;
+        /* Legacy implementation retained temporarily for compatibility review.
         if (!offer.tiers || offer.tiers.length === 0) {
             return null;
         }
@@ -117,10 +121,14 @@ class DataManager {
         }
 
         return null;
+        */
     }
 
     // Progress calculation (same logic as before but with async data loading)
     async calculateOfferProgress(offer) {
+        const transactions = await this.getTransactions();
+        return OfferEngine.calculateOfferProgress(offer, transactions);
+        /* Legacy calculation retained temporarily for migration comparison.
         // Use local time consistently - parse date strings as local dates
         const startDate = new Date(offer.startDate + 'T00:00:00');
         const endDate = new Date(offer.endDate + 'T23:59:59');
@@ -307,6 +315,7 @@ class DataManager {
                 earnedReward
             };
         }
+        */
     }
 
     // Merchant autocomplete methods
@@ -323,30 +332,7 @@ class DataManager {
     async getMatchingOffersForTransaction(transaction) {
         await this.ensureInitialized();
         const offers = await this.getOffers();
-        const matchingOffers = [];
-
-        for (const offer of offers) {
-            const startDate = new Date(offer.startDate + 'T00:00:00');
-            const endDate = new Date(offer.endDate + 'T23:59:59');
-            const transactionDate = new Date(transaction.date + 'T12:00:00');
-
-            // Check if transaction is within offer date range
-            const isInDateRange = transactionDate >= startDate && transactionDate <= endDate;
-
-            // Check category match - if offer has categories, transaction must have at least one matching category
-            const isCategoryMatch = !offer.categories || offer.categories.length === 0 ||
-                (transaction.categories && transaction.categories.some(transactionCat =>
-                    offer.categories.includes(transactionCat)));
-
-            // Check minimum transaction amount
-            const isMinAmountMet = !offer.minTransaction || transaction.amount >= offer.minTransaction;
-
-            if (isInDateRange && isCategoryMatch && isMinAmountMet) {
-                matchingOffers.push(offer);
-            }
-        }
-
-        return matchingOffers;
+        return offers.filter(offer => OfferEngine.evaluateEligibility(transaction, offer).eligible);
     }
 
     // Get all offers with progress and transactions, sorted by priority
@@ -365,21 +351,7 @@ class DataManager {
                 const endDate = new Date(offer.endDate + 'T23:59:59');
 
                 // Get transactions that apply to this offer
-                const offerTransactions = transactions.filter(t => {
-                    const transactionDate = this.parseLocalDate(t.date);
-                    const offerStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-                    const offerEnd = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
-                    const transDate = new Date(transactionDate.getFullYear(), transactionDate.getMonth(), transactionDate.getDate());
-                    const isInDateRange = transDate >= offerStart && transDate <= offerEnd;
-
-                    const isCategoryMatch = !offer.categories || offer.categories.length === 0 ||
-                        (t.categories && t.categories.some(transactionCat =>
-                            offer.categories.includes(transactionCat)));
-
-                    const isMinAmountMet = !offer.minTransaction || t.amount >= offer.minTransaction;
-
-                    return isInDateRange && isCategoryMatch && isMinAmountMet;
-                });
+                const offerTransactions = progress.eligibleTransactions;
 
                 // Determine completion status
                 let isComplete = false;

@@ -4,6 +4,7 @@
   "description": "Credit card offer tracking and optimization web app",
   "main": "server.js",
   "scripts": {
+    "test": "node --test",
     "start": "node server.js",
     "dev": "node server.js",
     "migrate": "node migrate.js",

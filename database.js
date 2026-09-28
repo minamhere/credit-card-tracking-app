@@ -215,6 +215,22 @@ class DatabaseManager {
         }
     }
 
+    async addOfferCredit(offerId, credit) {
+        const response = await fetch(`${this.baseUrl}/api/offers/${offerId}/credits`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(credit)
+        });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to record credit');
+        return response.json();
+    }
+
+    async deleteOfferCredit(offerId, creditId) {
+        const response = await fetch(`${this.baseUrl}/api/offers/${offerId}/credits/${creditId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to delete credit');
+        return response.json();
+    }
+
     // Transactions methods
     async getTransactions() {
         try {
@@ -290,6 +306,56 @@ class DatabaseManager {
             console.error('Error deleting transaction:', error);
             throw error;
         }
+    }
+
+    async previewTransactionImport(transactions) {
+        const response = await fetch(`${this.baseUrl}/api/transaction-imports/preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personId: this.currentPersonId, transactions })
+        });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to preview import');
+        return response.json();
+    }
+
+    async confirmTransactionImport(transactions, importMetadata = {}, accountEvents = []) {
+        const response = await fetch(`${this.baseUrl}/api/transaction-imports/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personId: this.currentPersonId, transactions, importMetadata, accountEvents })
+        });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to import transactions');
+        return response.json();
+    }
+
+    async getMerchantRules() {
+        const response = await fetch(`${this.baseUrl}/api/merchant-rules`);
+        if (!response.ok) throw new Error('Failed to load merchant rules');
+        return response.json();
+    }
+
+    async deleteMerchantRule(id) {
+        const response = await fetch(`${this.baseUrl}/api/merchant-rules/${id}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) throw new Error('Failed to delete merchant rule');
+        return response.json();
+    }
+
+    async getAccountEvents() {
+        const response = await fetch(`${this.baseUrl}/api/account-events?personId=${encodeURIComponent(this.currentPersonId)}`);
+        if (!response.ok) throw new Error('Failed to load account events');
+        return response.json();
+    }
+
+    async assignAccountEvent(eventId, offerId) {
+        const response = await fetch(`${this.baseUrl}/api/account-events/${eventId}/assign-offer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personId: this.currentPersonId, offerId })
+        });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to assign account event');
+        return response.json();
     }
 
     // Get unique merchants for autocomplete

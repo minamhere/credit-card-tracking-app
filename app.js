@@ -7,6 +7,8 @@ class OfferTracker {
         this.availableCategories = this.loadCategories();
         this.currentTransactionPage = 1;
         this.transactionsPerPage = 20;
+        this.importPreview = [];
+        this.importMetadata = null;
         this.init();
     }
 
@@ -17,7 +19,7 @@ class OfferTracker {
             return JSON.parse(stored);
         }
         // Default categories
-        return ['general', 'online', 'grocery', 'gas', 'restaurant', 'retail', 'travel', 'dining'];
+        return ['general', 'online', 'grocery', 'gas', 'restaurant', 'retail', 'entertainment', 'transportation', 'travel'];
     }
 
     saveCategories() {
@@ -129,6 +131,8 @@ class OfferTracker {
             await this.renderDashboard();
             console.log('Rendering transactions...');
             await this.renderTransactions();
+            await this.renderMerchantRules();
+            await this.renderAccountEvents();
             console.log('Rendering offers...');
             await this.renderOffers();
             console.log('All rendering complete');
@@ -184,6 +188,9 @@ class OfferTracker {
         await this.renderDashboard();
         await this.renderTransactions();
         await this.renderOffers();
+        this.clearImportPreview();
+        await this.renderMerchantRules();
+        await this.renderAccountEvents();
     }
 
     showPeopleModal() {
@@ -316,6 +323,15 @@ class OfferTracker {
             this.addTransaction();
         });
 
+        document.getElementById('citi-csv-file').addEventListener('change', (e) => {
+            this.handleCitiCsv(e.target.files[0]);
+        });
+
+        document.getElementById('csv-import-preview').addEventListener('click', (e) => {
+            if (e.target.id === 'confirm-csv-import') this.confirmCitiImport();
+            if (e.target.id === 'cancel-csv-import') this.clearImportPreview();
+        });
+
         document.getElementById('offer-form').addEventListener('submit', (e) => {
             e.preventDefault();
             this.saveOffer();
@@ -344,6 +360,215 @@ class OfferTracker {
         // Set up merchant autocomplete
         this.setupMerchantDropdown();
         this.setupEditMerchantAutocomplete();
+    }
+
+    escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    setImportMessage(message, type = '') {
+        const element = document.getElementById('csv-import-message');
+        element.textContent = message;
+        element.className = `import-message ${type}`.trim();
+    }
+
+    clearImportPreview() {
+        this.importPreview = [];
+        this.importMetadata = null;
+        const preview = document.getElementById('csv-import-preview');
+        preview.innerHTML = '';
+        preview.classList.add('hidden');
+        document.getElementById('citi-csv-file').value = '';
+    }
+
+    async handleCitiCsv(file) {
+        if (!file) return;
+        if (!this.dataManager.dbManager.getCurrentPerson()) {
+            this.setImportMessage('Select a card holder before importing.', 'error');
+            return;
+        }
+
+        try {
+            this.setImportMessage('Reading and checking the CSV…');
+            const fileText = await file.text();
+            const parsed = CitiCsv.parseCitiTransactions(fileText);
+            const hashBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(fileText));
+            const fileHash = Array.from(new Uint8Array(hashBytes)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+            this.importMetadata = { filename: file.name, fileHash, source: 'citi_csv' };
+            const result = await this.dataManager.dbManager.previewTransactionImport(parsed.transactions);
+            this.importPreview = result.transactions.map(item => ({
+                ...item,
+                originalMerchant: item.originalMerchant || item.merchant
+            }));
+            this.importMetadata.recordCount = this.importPreview.length;
+            this.renderImportPreview(parsed.errors);
+        } catch (error) {
+            this.clearImportPreview();
+            this.setImportMessage(error.message || 'Unable to read that CSV.', 'error');
+        }
+    }
+
+    renderImportPreview(parseErrors = []) {
+        const preview = document.getElementById('csv-import-preview');
+        const isPurchase = item => (item.transactionType || 'purchase').toLowerCase() === 'purchase';
+        const importable = this.importPreview.filter(item => !item.duplicate && !item.invalid && item.amount > 0 && isPurchase(item)).length;
+        const duplicates = this.importPreview.filter(item => item.duplicate).length;
+        const nonPurchases = this.importPreview.filter(item => item.amount <= 0 || !isPurchase(item)).length;
+
+        const rows = this.importPreview.map((item, index) => {
+            const selected = !item.duplicate && !item.invalid && item.amount > 0 && isPurchase(item);
+            const status = item.invalid ? 'Invalid' : item.duplicate ? 'Already imported' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : 'Needs category';
+            return `
+                <tr class="${selected ? '' : 'excluded-row'}">
+                    <td><input type="checkbox" class="import-select" data-index="${index}" ${selected ? 'checked' : ''} ${item.duplicate || item.invalid || item.amount <= 0 ? 'disabled' : ''}></td>
+                    <td>${this.escapeHtml(item.date)}</td>
+                    <td><input class="import-merchant" data-index="${index}" value="${this.escapeHtml(item.merchant)}"></td>
+                    <td class="amount-cell">$${Math.abs(Number(item.amount)).toFixed(2)}</td>
+                    <td><input class="import-categories" data-index="${index}" value="${this.escapeHtml((item.categories || []).join(', '))}" placeholder="grocery, online"></td>
+                    <td><label class="remember-rule"><input type="checkbox" class="import-save-rule" data-index="${index}" ${item.matchedRuleId ? '' : 'checked'} ${selected ? '' : 'disabled'}> Remember</label></td>
+                    <td><span class="import-status">${status}</span></td>
+                </tr>`;
+        }).join('');
+
+        preview.innerHTML = `
+            <div class="import-summary">
+                <strong>${importable} purchases ready</strong>
+                <span>${duplicates} duplicates, ${nonPurchases} non-purchases, ${parseErrors.length} invalid rows excluded</span>
+            </div>
+            <p class="import-help">Enter one or more comma-separated bonus categories. “Remember” saves the Citi description as a merchant rule for future imports.</p>
+            <div class="import-table-wrap">
+                <table class="import-table">
+                    <thead><tr><th>Import</th><th>Date</th><th>Merchant</th><th>Amount</th><th>Categories</th><th>Rule</th><th>Status</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+            <div class="form-buttons import-actions">
+                <button type="button" id="confirm-csv-import" ${importable ? '' : 'disabled'}>Import selected purchases</button>
+                <button type="button" id="cancel-csv-import" class="btn-secondary">Cancel</button>
+            </div>`;
+        preview.classList.remove('hidden');
+        this.setImportMessage(`Review ${this.importPreview.length} CSV rows before importing.`, 'success');
+    }
+
+    async confirmCitiImport() {
+        const selected = [];
+        document.querySelectorAll('.import-select:checked').forEach(checkbox => {
+            const index = Number(checkbox.dataset.index);
+            const item = this.importPreview[index];
+            const merchant = document.querySelector(`.import-merchant[data-index="${index}"]`).value.trim();
+            const categories = document.querySelector(`.import-categories[data-index="${index}"]`).value
+                .split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+            const saveRule = document.querySelector(`.import-save-rule[data-index="${index}"]`).checked;
+            selected.push({ ...item, merchant, categories, saveRule, rulePattern: item.originalMerchant });
+        });
+
+        if (!selected.length) {
+            this.setImportMessage('Select at least one purchase to import.', 'error');
+            return;
+        }
+        if (selected.some(item => !item.merchant)) {
+            this.setImportMessage('Every selected row needs a merchant name.', 'error');
+            return;
+        }
+        if (selected.some(item => item.categories.length === 0)) {
+            this.setImportMessage('Every selected purchase needs at least one category so bonus tracking stays accurate.', 'error');
+            return;
+        }
+
+        const button = document.getElementById('confirm-csv-import');
+        button.disabled = true;
+        button.textContent = 'Importing…';
+        try {
+            const accountEvents = this.importPreview.filter(item =>
+                !item.duplicate && !item.invalid && ((item.transactionType || 'purchase').toLowerCase() !== 'purchase' || item.amount <= 0)
+            );
+            const result = await this.dataManager.dbManager.confirmTransactionImport(selected, this.importMetadata || {}, accountEvents);
+            selected.flatMap(item => item.categories).forEach(category => this.addCategory(category));
+            this.clearImportPreview();
+            this.setImportMessage(`Imported ${result.imported} purchases and ${result.eventsImported || 0} account events. ${result.skipped} rows were skipped.`, 'success');
+            await this.renderTransactions();
+            await this.renderDashboard();
+            await this.renderMerchantRules();
+            await this.renderAccountEvents();
+        } catch (error) {
+            button.disabled = false;
+            button.textContent = 'Import selected purchases';
+            this.setImportMessage(error.message || 'Import failed.', 'error');
+        }
+    }
+
+    async renderMerchantRules() {
+        const container = document.getElementById('merchant-rules-list');
+        if (!this.dataManager.dbManager.getCurrentPerson()) {
+            container.innerHTML = '<p>Select a card holder to view rules.</p>';
+            return;
+        }
+        try {
+            const rules = await this.dataManager.dbManager.getMerchantRules();
+            container.innerHTML = rules.length ? rules.map(rule => `
+                <div class="merchant-rule">
+                    <div><strong>${this.escapeHtml(rule.merchant)}</strong><small>Matches “${this.escapeHtml(rule.pattern)}”</small></div>
+                    <span>${this.escapeHtml(rule.categories.join(', '))}</span>
+                    <button type="button" class="delete-btn" onclick="tracker.deleteMerchantRule(${rule.id})">Delete</button>
+                </div>`).join('') : '<p>No saved rules yet. Rules can be created while importing a CSV.</p>';
+        } catch (error) {
+            container.innerHTML = '<p>Merchant rules could not be loaded.</p>';
+        }
+    }
+
+    async deleteMerchantRule(id) {
+        if (!confirm('Delete this merchant category rule? Existing transactions will not be changed.')) return;
+        await this.dataManager.dbManager.deleteMerchantRule(id);
+        await this.renderMerchantRules();
+    }
+
+    async renderAccountEvents() {
+        const container = document.getElementById('account-events-list');
+        if (!this.dataManager.dbManager.getCurrentPerson()) {
+            container.innerHTML = '<p>Select a card holder to view account events.</p>';
+            return;
+        }
+        try {
+            const [events, offers] = await Promise.all([
+                this.dataManager.dbManager.getAccountEvents(),
+                this.dataManager.getOffers()
+            ]);
+            const unassigned = events.filter(event => !event.assignedOfferCreditId);
+            if (!unassigned.length) {
+                container.innerHTML = '<p>No unassigned statement credits.</p>';
+                return;
+            }
+            const options = offers.map(offer => `<option value="${offer.id}">${this.escapeHtml(offer.name)}</option>`).join('');
+            container.innerHTML = unassigned.map(event => `
+                <div class="account-event">
+                    <div><strong>$${Math.abs(Number(event.amount)).toFixed(2)}</strong><small>${this.escapeHtml(event.date)} · ${this.escapeHtml(event.eventType)}</small></div>
+                    <span>${this.escapeHtml(event.description)}</span>
+                    <select id="account-event-offer-${event.id}"><option value="">Assign to offer…</option>${options}</select>
+                    <button type="button" class="small-btn" onclick="tracker.assignAccountEvent(${event.id})">Assign</button>
+                </div>`).join('');
+        } catch (error) {
+            container.innerHTML = '<p>Account events could not be loaded.</p>';
+        }
+    }
+
+    async assignAccountEvent(eventId) {
+        const offerId = document.getElementById(`account-event-offer-${eventId}`).value;
+        if (!offerId) {
+            alert('Choose an offer first.');
+            return;
+        }
+        try {
+            await this.dataManager.dbManager.assignAccountEvent(eventId, offerId);
+            await this.renderAccountEvents();
+            await this.renderDashboard();
+        } catch (error) {
+            alert('Failed to assign statement credit: ' + error.message);
+        }
     }
 
     async setupMerchantDropdown() {
@@ -1022,7 +1247,8 @@ class OfferTracker {
                                                 `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
                                         }
                                     </div>
-                                    <div style="font-size: 0.8em; color: var(--text-secondary);">Earned: $${Number(earned).toFixed(2)}</div>
+                                    <div style="font-size: 0.8em; color: var(--text-secondary);">Expected: $${Number(progress.expectedReward ?? earned).toFixed(2)}</div>
+                                    <div style="font-size: 0.8em; color: var(--text-secondary);">Posted: $${Number(progress.postedCredits || 0).toFixed(2)} · Outstanding: $${Number(progress.outstandingReward ?? earned).toFixed(2)}</div>
                                 </div>
                             </div>
                             <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
@@ -1043,6 +1269,7 @@ class OfferTracker {
                         ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
                         ${transactionsHtml}
                         <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            <button class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.85em; margin: 0;" onclick="tracker.recordOfferCredit(${offer.id})">Record statement credit</button>
                             ${offer.bonusReward && !offer.bonusPosted ? `<button class="btn-primary" style="padding: 0.3rem 0.6rem; font-size: 0.85em; margin: 0;" onclick="tracker.markBonusPosted(${offer.id})">Mark Bonus Posted</button>` : ''}
                             ${offer.bonusReward && offer.bonusPosted ? `<span style="font-size: 0.85em; color: #28a745; font-weight: bold;">✓ Bonus Posted${offer.bonusPostedDate ? ` on ${new Date(offer.bonusPostedDate).toLocaleDateString()}` : ''}</span>` : ''}
                             ${offer.expired || progress.status === 'completed' ? `<button class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.85em; margin: 0;" onclick="tracker.hideOffer(${offer.id})">Hide Offer</button>` : ''}
@@ -1694,6 +1921,25 @@ class OfferTracker {
                 </div>
             </div>
         `;
+    }
+
+    async recordOfferCredit(offerId) {
+        const amountText = prompt('Statement credit amount:');
+        if (amountText === null) return;
+        const amount = Number(String(amountText).replace(/[$,]/g, ''));
+        if (!Number.isFinite(amount) || amount <= 0) {
+            alert('Enter a positive credit amount.');
+            return;
+        }
+        const postedDate = prompt('Posted date (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
+        if (postedDate === null) return;
+        const description = prompt('Description (optional):', '') || '';
+        try {
+            await this.dataManager.dbManager.addOfferCredit(offerId, { amount, postedDate, description });
+            await this.renderDashboard();
+        } catch (error) {
+            alert('Failed to record statement credit: ' + error.message);
+        }
     }
 
     async markBonusPosted(offerId) {

@@ -1063,6 +1063,104 @@ button:hover {
     margin-bottom: 1.5rem;
 }
 
+/* Citi CSV import */
+.import-panel {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 2rem;
+    background: var(--bg-tertiary);
+}
+
+.section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.section-heading p,
+.import-help,
+.import-summary span,
+.merchant-rule small {
+    color: var(--text-secondary);
+}
+
+.file-picker {
+    display: inline-block;
+    padding: 0.65rem 1rem;
+    border-radius: 5px;
+    color: white;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.file-picker input { display: none; }
+
+.import-message { min-height: 1.5rem; margin-top: 0.75rem; }
+.import-message.error { color: #c62828; }
+.import-message.success { color: #287d3c; }
+
+.import-summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 0.5rem 0;
+}
+
+.import-help { font-size: 0.9rem; margin-bottom: 0.75rem; }
+.import-table-wrap { overflow-x: auto; }
+.import-table { width: 100%; border-collapse: collapse; min-width: 900px; }
+.import-table th, .import-table td { padding: 0.5rem; border-bottom: 1px solid var(--border-color); text-align: left; }
+.import-table input[type="text"], .import-table input:not([type]) {
+    width: 100%;
+    min-width: 150px;
+    padding: 0.45rem;
+    background: var(--input-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+}
+.import-table .import-categories { min-width: 190px; }
+.excluded-row { opacity: 0.55; }
+.amount-cell { white-space: nowrap; }
+.remember-rule { display: flex; gap: 0.35rem; align-items: center; }
+.import-actions { margin-top: 1rem; }
+
+#merchant-rules-panel { margin-top: 1rem; }
+#merchant-rules-panel summary { cursor: pointer; font-weight: 600; }
+#merchant-rules-list { margin-top: 0.75rem; }
+#account-events-panel { margin-top: 0.75rem; }
+#account-events-panel summary { cursor: pointer; font-weight: 600; }
+#account-events-list { margin-top: 0.75rem; }
+.merchant-rule {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(140px, 1fr) auto;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.merchant-rule small { display: block; }
+.account-event {
+    display: grid;
+    grid-template-columns: minmax(130px, auto) minmax(180px, 1fr) minmax(180px, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.account-event small { display: block; color: var(--text-secondary); }
+.account-event select { padding: 0.45rem; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--input-border); }
+
+@media (max-width: 768px) {
+    .section-heading, .import-summary { flex-direction: column; align-items: flex-start; }
+    .merchant-rule { grid-template-columns: 1fr auto; }
+    .merchant-rule span { grid-column: 1 / -1; grid-row: 2; }
+    .account-event { grid-template-columns: 1fr auto; }
+    .account-event span, .account-event select { grid-column: 1 / -1; }
+}
+
 /* Custom Category Input */
 .custom-category-input {
     display: flex;

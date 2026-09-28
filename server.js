@@ -3,6 +3,8 @@ const path = require('path');
 const cors = require('cors');
 const { Pool } = require('pg');
 const fs = require('fs');
+const crypto = require('crypto');
+const OfferEngine = require('./offer-engine');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -19,6 +21,106 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: shouldUseSSL ? { rejectUnauthorized: false } : false
 });
+
+function normalizeMerchant(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+function transactionHash(personId, transaction) {
+  // Keep the fingerprint tied to Citi's original description even when a rule
+  // replaces it with a cleaner display name.
+  const sourceMerchant = transaction.originalMerchant || transaction.merchant;
+  const occurrence = Number(transaction.importOccurrence) || 1;
+  const identity = [personId, transaction.date, Number(transaction.amount).toFixed(2), normalizeMerchant(sourceMerchant), occurrence].join('|');
+  return crypto.createHash('sha256').update(identity).digest('hex');
+}
+
+function ruleMatches(rule, merchant) {
+  const candidate = normalizeMerchant(merchant);
+  const pattern = normalizeMerchant(rule.merchant_pattern);
+  return rule.match_type === 'exact' ? candidate === pattern : candidate.includes(pattern);
+}
+
+// Starting suggestions for merchants observed in Citi exports. User-saved rules
+// are checked first and always override these defaults.
+const defaultMerchantRules = [
+  { pattern: 'LOST ISLAND', merchant: 'Lost Island', categories: ['entertainment'] },
+  { pattern: 'TRADER JOE', merchant: "Trader Joe's", categories: ['grocery'] },
+  { pattern: 'KING SOOPERS', merchant: 'King Soopers', categories: ['grocery'] },
+  { pattern: 'MAVERIK', merchant: 'Maverik', categories: ['gas'] },
+  { pattern: 'TARGET', merchant: 'Target', categories: ['retail'] },
+  { pattern: 'TJMAXX', merchant: 'TJ Maxx', categories: ['retail'] },
+  { pattern: 'HOME DEPOT', merchant: 'Home Depot', categories: ['retail'] },
+  { pattern: 'WELCOME TO LV', merchant: 'Welcome to Las Vegas', categories: ['retail'] },
+  { pattern: 'COORS FIELD MRC', merchant: 'Coors Field Merchandise', categories: ['retail'] },
+  { pattern: 'UBER CASH', merchant: 'Uber Cash', categories: ['transportation'] },
+  { pattern: "CHILI'S", merchant: "Chili's", categories: ['restaurant'] },
+  { pattern: 'ILLEGAL PETE', merchant: "Illegal Pete's", categories: ['restaurant'] },
+  { pattern: 'PORT OF SUBS', merchant: 'Port of Subs', categories: ['restaurant'] },
+  { pattern: 'TOKYO JOES', merchant: "Tokyo Joe's", categories: ['restaurant'] },
+  { pattern: 'KB COFFEE', merchant: 'KB Coffee & Bakery', categories: ['restaurant'] },
+  { pattern: 'LOST FRIEND BREWIN', merchant: 'Lost Friend Brewing', categories: ['restaurant'] },
+  { pattern: 'GOAT PATCH', merchant: 'Goat Patch Brewing', categories: ['restaurant'] },
+  { pattern: 'GREATDIVIDEBREWERY', merchant: 'Great Divide Brewery', categories: ['restaurant'] },
+  { pattern: 'CARBOY WINERY', merchant: 'Carboy Winery', categories: ['restaurant'] },
+  { pattern: 'FRESH ATTRACTION', merchant: 'Fresh Attraction', categories: ['restaurant'] },
+  { pattern: 'COORS FIELD GENER', merchant: 'Coors Field Concessions', categories: ['restaurant'] }
+];
+
+function findDefaultMerchantRule(merchant) {
+  const candidate = normalizeMerchant(merchant);
+  return defaultMerchantRules.find(rule => candidate.includes(rule.pattern));
+}
+
+function serializeOffer(row, credits = []) {
+  const legacy = {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    spendingTarget: row.spending_target,
+    transactionTarget: row.transaction_target,
+    minTransaction: row.min_transaction,
+    categories: row.categories || [],
+    reward: row.reward,
+    bonusReward: row.bonus_reward,
+    tiers: row.tiers || [],
+    description: row.description,
+    monthlyTracking: row.monthly_tracking,
+    personId: row.person_id,
+    percentBack: row.percent_back,
+    maxBack: row.max_back,
+    minSpendThreshold: row.min_spend_threshold,
+    bonusPosted: row.bonus_posted,
+    bonusPostedDate: row.bonus_posted_date,
+    bonusPostedAmount: row.bonus_posted_amount,
+    hidden: row.hidden,
+    credits
+  };
+  const normalized = OfferEngine.normalizeOffer({
+    ...legacy,
+    eligibility: row.eligibility || undefined,
+    measurement: row.measurement || undefined,
+    rewardConfig: row.reward_config || undefined
+  });
+  return {
+    ...legacy,
+    eligibility: normalized.eligibility,
+    measurement: normalized.measurement,
+    rewardConfig: normalized.rewardConfig,
+    engineVersion: row.engine_version || 2
+  };
+}
+
+function configsForOffer(input) {
+  const normalized = OfferEngine.normalizeOffer(input);
+  return {
+    eligibility: normalized.eligibility,
+    measurement: normalized.measurement,
+    rewardConfig: normalized.rewardConfig
+  };
+}
 
 // Run migrations on startup
 async function runMigrations() {
@@ -118,30 +220,14 @@ app.get('/api/offers', async (req, res) => {
     query += ' ORDER BY start_date';
 
     const result = await pool.query(query, params);
-    const offers = result.rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      type: row.type,
-      startDate: row.start_date,
-      endDate: row.end_date,
-      spendingTarget: row.spending_target,
-      transactionTarget: row.transaction_target,
-      minTransaction: row.min_transaction,
-      categories: row.categories || [],
-      reward: row.reward,
-      bonusReward: row.bonus_reward,
-      tiers: row.tiers || [],
-      description: row.description,
-      monthlyTracking: row.monthly_tracking,
-      personId: row.person_id,
-      percentBack: row.percent_back,
-      maxBack: row.max_back,
-      minSpendThreshold: row.min_spend_threshold,
-      bonusPosted: row.bonus_posted,
-      bonusPostedDate: row.bonus_posted_date,
-      bonusPostedAmount: row.bonus_posted_amount,
-      hidden: row.hidden
-    }));
+    const offerIds = result.rows.map(row => row.id);
+    const creditsResult = offerIds.length ? await pool.query(
+      'SELECT * FROM offer_credits WHERE offer_id = ANY($1::int[]) ORDER BY posted_date, id',
+      [offerIds]
+    ) : { rows: [] };
+    const offers = result.rows.map(row => serializeOffer(row, creditsResult.rows
+      .filter(credit => credit.offer_id === row.id)
+      .map(credit => ({ id: credit.id, amount: Number(credit.amount), postedDate: credit.posted_date, description: credit.description }))));
     res.json(offers);
   } catch (err) {
     console.error('Error fetching offers:', err);
@@ -151,6 +237,7 @@ app.get('/api/offers', async (req, res) => {
 
 app.post('/api/offers', async (req, res) => {
   try {
+    const configs = configsForOffer(req.body);
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
       minTransaction, categories, reward, bonusReward, tiers, description, monthlyTracking, personId,
@@ -162,40 +249,18 @@ app.post('/api/offers', async (req, res) => {
         name, type, start_date, end_date, spending_target,
         transaction_target, min_transaction, categories, reward,
         bonus_reward, tiers, description, monthly_tracking, person_id,
-        percent_back, max_back, min_spend_threshold
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        percent_back, max_back, min_spend_threshold, eligibility, measurement, reward_config
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
       transactionTarget, minTransaction, categories || [], reward,
       bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId,
-      percentBack, maxBack, minSpendThreshold
+      percentBack, maxBack, minSpendThreshold,
+      JSON.stringify(configs.eligibility), JSON.stringify(configs.measurement), JSON.stringify(configs.rewardConfig)
     ]);
 
-    const offer = {
-      id: result.rows[0].id,
-      name: result.rows[0].name,
-      type: result.rows[0].type,
-      startDate: result.rows[0].start_date,
-      endDate: result.rows[0].end_date,
-      spendingTarget: result.rows[0].spending_target,
-      transactionTarget: result.rows[0].transaction_target,
-      minTransaction: result.rows[0].min_transaction,
-      categories: result.rows[0].categories || [],
-      reward: result.rows[0].reward,
-      bonusReward: result.rows[0].bonus_reward,
-      tiers: result.rows[0].tiers || [],
-      description: result.rows[0].description,
-      monthlyTracking: result.rows[0].monthly_tracking,
-      personId: result.rows[0].person_id,
-      percentBack: result.rows[0].percent_back,
-      maxBack: result.rows[0].max_back,
-      minSpendThreshold: result.rows[0].min_spend_threshold,
-      bonusPosted: result.rows[0].bonus_posted,
-      bonusPostedDate: result.rows[0].bonus_posted_date,
-      bonusPostedAmount: result.rows[0].bonus_posted_amount,
-      hidden: result.rows[0].hidden
-    };
+    const offer = serializeOffer(result.rows[0]);
 
     res.json(offer);
   } catch (err) {
@@ -206,6 +271,7 @@ app.post('/api/offers', async (req, res) => {
 
 app.put('/api/offers/:id', async (req, res) => {
   try {
+    const configs = configsForOffer(req.body);
     const { id } = req.params;
     const {
       name, type, startDate, endDate, spendingTarget, transactionTarget,
@@ -218,44 +284,23 @@ app.put('/api/offers/:id', async (req, res) => {
         name = $1, type = $2, start_date = $3, end_date = $4,
         spending_target = $5, transaction_target = $6, min_transaction = $7,
         categories = $8, reward = $9, bonus_reward = $10, tiers = $11, description = $12,
-        monthly_tracking = $13, person_id = $14, percent_back = $15, max_back = $16, min_spend_threshold = $17
-      WHERE id = $18
+        monthly_tracking = $13, person_id = $14, percent_back = $15, max_back = $16, min_spend_threshold = $17,
+        eligibility = $18, measurement = $19, reward_config = $20, engine_version = 2
+      WHERE id = $21
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
       transactionTarget, minTransaction, categories || [], reward,
       bonusReward, JSON.stringify(tiers || []), description, monthlyTracking, personId,
-      percentBack, maxBack, minSpendThreshold, id
+      percentBack, maxBack, minSpendThreshold,
+      JSON.stringify(configs.eligibility), JSON.stringify(configs.measurement), JSON.stringify(configs.rewardConfig), id
     ]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Offer not found' });
     }
 
-    const offer = {
-      id: result.rows[0].id,
-      name: result.rows[0].name,
-      type: result.rows[0].type,
-      startDate: result.rows[0].start_date,
-      endDate: result.rows[0].end_date,
-      spendingTarget: result.rows[0].spending_target,
-      transactionTarget: result.rows[0].transaction_target,
-      minTransaction: result.rows[0].min_transaction,
-      categories: result.rows[0].categories || [],
-      reward: result.rows[0].reward,
-      bonusReward: result.rows[0].bonus_reward,
-      tiers: result.rows[0].tiers || [],
-      description: result.rows[0].description,
-      monthlyTracking: result.rows[0].monthly_tracking,
-      personId: result.rows[0].person_id,
-      percentBack: result.rows[0].percent_back,
-      maxBack: result.rows[0].max_back,
-      minSpendThreshold: result.rows[0].min_spend_threshold,
-      bonusPosted: result.rows[0].bonus_posted,
-      bonusPostedDate: result.rows[0].bonus_posted_date,
-      bonusPostedAmount: result.rows[0].bonus_posted_amount,
-      hidden: result.rows[0].hidden
-    };
+    const offer = serializeOffer(result.rows[0]);
 
     res.json(offer);
   } catch (err) {
@@ -296,30 +341,7 @@ app.patch('/api/offers/:id', async (req, res) => {
       return res.status(404).json({ error: 'Offer not found' });
     }
 
-    const offer = {
-      id: result.rows[0].id,
-      name: result.rows[0].name,
-      type: result.rows[0].type,
-      startDate: result.rows[0].start_date,
-      endDate: result.rows[0].end_date,
-      spendingTarget: result.rows[0].spending_target,
-      transactionTarget: result.rows[0].transaction_target,
-      minTransaction: result.rows[0].min_transaction,
-      categories: result.rows[0].categories || [],
-      reward: result.rows[0].reward,
-      bonusReward: result.rows[0].bonus_reward,
-      tiers: result.rows[0].tiers || [],
-      description: result.rows[0].description,
-      monthlyTracking: result.rows[0].monthly_tracking,
-      personId: result.rows[0].person_id,
-      percentBack: result.rows[0].percent_back,
-      maxBack: result.rows[0].max_back,
-      minSpendThreshold: result.rows[0].min_spend_threshold,
-      bonusPosted: result.rows[0].bonus_posted,
-      bonusPostedDate: result.rows[0].bonus_posted_date,
-      bonusPostedAmount: result.rows[0].bonus_posted_amount,
-      hidden: result.rows[0].hidden
-    };
+    const offer = serializeOffer(result.rows[0]);
 
     res.json(offer);
   } catch (err) {
@@ -337,35 +359,51 @@ app.get('/api/offers/:id', async (req, res) => {
       return res.status(404).json({ error: 'Offer not found' });
     }
 
-    const offer = {
-      id: result.rows[0].id,
-      name: result.rows[0].name,
-      type: result.rows[0].type,
-      startDate: result.rows[0].start_date,
-      endDate: result.rows[0].end_date,
-      spendingTarget: result.rows[0].spending_target,
-      transactionTarget: result.rows[0].transaction_target,
-      minTransaction: result.rows[0].min_transaction,
-      categories: result.rows[0].categories || [],
-      reward: result.rows[0].reward,
-      bonusReward: result.rows[0].bonus_reward,
-      tiers: result.rows[0].tiers || [],
-      description: result.rows[0].description,
-      monthlyTracking: result.rows[0].monthly_tracking,
-      personId: result.rows[0].person_id,
-      percentBack: result.rows[0].percent_back,
-      maxBack: result.rows[0].max_back,
-      minSpendThreshold: result.rows[0].min_spend_threshold,
-      bonusPosted: result.rows[0].bonus_posted,
-      bonusPostedDate: result.rows[0].bonus_posted_date,
-      bonusPostedAmount: result.rows[0].bonus_posted_amount,
-      hidden: result.rows[0].hidden
-    };
+    const creditsResult = await pool.query('SELECT * FROM offer_credits WHERE offer_id = $1 ORDER BY posted_date, id', [id]);
+    const offer = serializeOffer(result.rows[0], creditsResult.rows.map(credit => ({
+      id: credit.id,
+      amount: Number(credit.amount),
+      postedDate: credit.posted_date,
+      description: credit.description
+    })));
 
     res.json(offer);
   } catch (err) {
     console.error('Error fetching offer:', err);
     res.status(500).json({ error: 'Failed to fetch offer' });
+  }
+});
+
+app.post('/api/offers/:id/credits', async (req, res) => {
+  try {
+    const amount = Number(req.body.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: 'A positive credit amount is required.' });
+    }
+    const result = await pool.query(`
+      INSERT INTO offer_credits (offer_id, amount, posted_date, description, source_transaction_id)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `, [req.params.id, amount, req.body.postedDate || null, req.body.description || '', req.body.sourceTransactionId || null]);
+    const credit = result.rows[0];
+    res.json({ id: credit.id, amount: Number(credit.amount), postedDate: credit.posted_date, description: credit.description });
+  } catch (err) {
+    console.error('Error adding offer credit:', err);
+    res.status(500).json({ error: 'Failed to add offer credit' });
+  }
+});
+
+app.delete('/api/offers/:offerId/credits/:creditId', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM offer_credits WHERE id = $1 AND offer_id = $2 RETURNING id',
+      [req.params.creditId, req.params.offerId]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Offer credit not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting offer credit:', err);
+    res.status(500).json({ error: 'Failed to delete offer credit' });
   }
 });
 
@@ -391,7 +429,11 @@ app.get('/api/transactions', async (req, res) => {
       merchant: row.merchant,
       categories: row.categories || [],
       description: row.description,
-      personId: row.person_id
+      personId: row.person_id,
+      rawMerchant: row.raw_merchant || row.merchant,
+      transactionType: row.transaction_type || 'purchase',
+      source: row.source || 'manual',
+      importBatchId: row.import_batch_id
     }));
     res.json(transactions);
   } catch (err) {
@@ -402,13 +444,13 @@ app.get('/api/transactions', async (req, res) => {
 
 app.post('/api/transactions', async (req, res) => {
   try {
-    const { date, amount, merchant, categories, description, personId } = req.body;
+    const { date, amount, merchant, categories, description, personId, transactionType } = req.body;
 
     const result = await pool.query(`
-      INSERT INTO transactions (date, amount, merchant, categories, description, person_id)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO transactions (date, amount, merchant, categories, description, person_id, raw_merchant, transaction_type)
+      VALUES ($1, $2, $3, $4, $5, $6, $3, $7)
       RETURNING *
-    `, [date, amount, merchant, categories || [], description || '', personId]);
+    `, [date, amount, merchant, categories || [], description || '', personId, transactionType || 'purchase']);
 
     const transaction = {
       id: result.rows[0].id,
@@ -417,7 +459,9 @@ app.post('/api/transactions', async (req, res) => {
       merchant: result.rows[0].merchant,
       categories: result.rows[0].categories || [],
       description: result.rows[0].description,
-      personId: result.rows[0].person_id
+      personId: result.rows[0].person_id,
+      rawMerchant: result.rows[0].raw_merchant || result.rows[0].merchant,
+      transactionType: result.rows[0].transaction_type || 'purchase'
     };
 
     res.json(transaction);
@@ -473,6 +517,249 @@ app.delete('/api/transactions/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting transaction:', err);
     res.status(500).json({ error: 'Failed to delete transaction' });
+  }
+});
+
+// Preview a normalized Citi CSV import. Parsing happens in the browser; the
+// server applies saved category rules and checks the authoritative database.
+app.post('/api/transaction-imports/preview', async (req, res) => {
+  try {
+    const { personId, transactions } = req.body;
+    if (!personId || !Array.isArray(transactions) || transactions.length > 2000) {
+      return res.status(400).json({ error: 'A card holder and up to 2,000 transactions are required.' });
+    }
+
+    const rulesResult = await pool.query(
+      'SELECT * FROM merchant_category_rules ORDER BY LENGTH(merchant_pattern) DESC, id'
+    );
+
+    const preview = [];
+    const occurrences = new Map();
+    for (const item of transactions) {
+      const amount = Number(item.amount);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date || '') || !String(item.merchant || '').trim() || !Number.isFinite(amount)) {
+        preview.push({ ...item, invalid: true, duplicate: false, categories: [] });
+        continue;
+      }
+      const occurrenceKey = [item.date, Number(item.amount).toFixed(2), normalizeMerchant(item.merchant)].join('|');
+      const importOccurrence = (occurrences.get(occurrenceKey) || 0) + 1;
+      occurrences.set(occurrenceKey, importOccurrence);
+      const itemWithOccurrence = { ...item, importOccurrence };
+      const hash = transactionHash(personId, itemWithOccurrence);
+      const duplicateResult = await pool.query(`
+        SELECT id FROM transactions
+        WHERE person_id = $1 AND (
+          source_hash = $2 OR
+          (source_hash IS NULL AND date = $3 AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
+        ) LIMIT 1
+      `, [personId, hash, item.date, amount, normalizeMerchant(item.merchant)]);
+      const matchingRule = rulesResult.rows.find(rule => ruleMatches(rule, item.merchant));
+      const defaultRule = matchingRule ? null : findDefaultMerchantRule(item.merchant);
+      preview.push({
+        ...item,
+        amount,
+        importOccurrence,
+        originalMerchant: String(item.merchant).trim(),
+        sourceHash: hash,
+        duplicate: duplicateResult.rows.length > 0,
+        invalid: false,
+        categories: matchingRule ? matchingRule.categories : (defaultRule ? defaultRule.categories : []),
+        merchant: matchingRule ? matchingRule.merchant_name : (defaultRule ? defaultRule.merchant : String(item.merchant).trim()),
+        matchedRuleId: matchingRule ? matchingRule.id : null
+      });
+    }
+    res.json({ transactions: preview });
+  } catch (err) {
+    console.error('Error previewing transaction import:', err);
+    res.status(500).json({ error: 'Failed to preview transaction import' });
+  }
+});
+
+app.post('/api/transaction-imports/confirm', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { personId, transactions, importMetadata = {}, accountEvents = [] } = req.body;
+    if (!personId || !Array.isArray(transactions) || !Array.isArray(accountEvents) || transactions.length + accountEvents.length > 2000) {
+      return res.status(400).json({ error: 'A card holder and up to 2,000 transactions are required.' });
+    }
+
+    await client.query('BEGIN');
+    const batchResult = await client.query(`
+      INSERT INTO import_batches (person_id, source, filename, file_hash, record_count)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id
+    `, [personId, importMetadata.source || 'citi_csv', importMetadata.filename || null,
+        importMetadata.fileHash || null, importMetadata.recordCount || transactions.length + accountEvents.length]);
+    const importBatchId = batchResult.rows[0].id;
+    let imported = 0;
+    let eventsImported = 0;
+    let skipped = 0;
+    for (const item of transactions) {
+      const amount = Number(item.amount);
+      const merchant = String(item.merchant || '').trim();
+      const transactionType = String(item.transactionType || 'purchase').toLowerCase();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date || '') || !merchant || !Number.isFinite(amount) || amount <= 0 || transactionType !== 'purchase') {
+        skipped++;
+        continue;
+      }
+      const hash = transactionHash(personId, item);
+      const duplicate = await client.query(`
+        SELECT id FROM transactions
+        WHERE person_id = $1 AND (
+          source_hash = $2 OR
+          (source_hash IS NULL AND date = $3 AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
+        ) LIMIT 1
+      `, [personId, hash, item.date, amount, normalizeMerchant(merchant)]);
+      if (duplicate.rows.length > 0) {
+        skipped++;
+        continue;
+      }
+
+      const categories = Array.isArray(item.categories)
+        ? [...new Set(item.categories.map(value => String(value).trim().toLowerCase()).filter(Boolean))]
+        : [];
+      await client.query(`
+        INSERT INTO transactions
+          (date, amount, merchant, categories, description, person_id, source, source_hash, raw_merchant, transaction_type, import_batch_id)
+        VALUES ($1, $2, $3, $4, $5, $6, 'citi_csv', $7, $8, $9, $10)
+      `, [item.date, amount, merchant, categories, item.description || '', personId, hash,
+          item.originalMerchant || merchant, transactionType, importBatchId]);
+      imported++;
+
+      if (item.saveRule && categories.length > 0) {
+        const pattern = normalizeMerchant(item.rulePattern || item.originalMerchant || merchant);
+        await client.query(`
+          INSERT INTO merchant_category_rules
+            (merchant_pattern, merchant_name, match_type, categories)
+          VALUES ($1, $2, 'contains', $3)
+          ON CONFLICT (merchant_pattern, match_type)
+          DO UPDATE SET merchant_name = EXCLUDED.merchant_name,
+                        categories = EXCLUDED.categories,
+                        updated_at = CURRENT_TIMESTAMP
+        `, [pattern, merchant, categories]);
+      }
+    }
+    for (const item of accountEvents) {
+      const amount = Number(item.amount);
+      const description = String(item.originalMerchant || item.merchant || '').trim();
+      const eventType = String(item.transactionType || item.description || 'account event').toLowerCase();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date || '') || !description || !Number.isFinite(amount)) {
+        skipped++;
+        continue;
+      }
+      const hash = transactionHash(personId, item);
+      const result = await client.query(`
+        INSERT INTO account_events
+          (person_id, import_batch_id, event_date, amount, description, event_type, source_hash)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (person_id, source_hash) DO NOTHING
+        RETURNING id
+      `, [personId, importBatchId, item.date, amount, description, eventType, hash]);
+      if (result.rows.length) eventsImported++;
+      else skipped++;
+    }
+    await client.query('UPDATE import_batches SET imported_count = $1 WHERE id = $2', [imported, importBatchId]);
+    await client.query('COMMIT');
+    res.json({ imported, eventsImported, skipped, importBatchId });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error importing transactions:', err);
+    res.status(500).json({ error: 'Failed to import transactions' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/merchant-rules', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM merchant_category_rules ORDER BY merchant_name'
+    );
+    res.json(result.rows.map(row => ({
+      id: row.id,
+      pattern: row.merchant_pattern,
+      merchant: row.merchant_name,
+      matchType: row.match_type,
+      categories: row.categories || []
+    })));
+  } catch (err) {
+    console.error('Error fetching merchant rules:', err);
+    res.status(500).json({ error: 'Failed to fetch merchant rules' });
+  }
+});
+
+app.delete('/api/merchant-rules/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM merchant_category_rules WHERE id = $1 RETURNING id',
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Merchant rule not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting merchant rule:', err);
+    res.status(500).json({ error: 'Failed to delete merchant rule' });
+  }
+});
+
+app.get('/api/account-events', async (req, res) => {
+  try {
+    if (!req.query.personId) return res.status(400).json({ error: 'personId is required' });
+    const result = await pool.query(`
+      SELECT * FROM account_events
+      WHERE person_id = $1
+      ORDER BY event_date DESC, id DESC
+    `, [req.query.personId]);
+    res.json(result.rows.map(row => ({
+      id: row.id,
+      date: row.event_date,
+      amount: Number(row.amount),
+      description: row.description,
+      eventType: row.event_type,
+      assignedOfferCreditId: row.assigned_offer_credit_id
+    })));
+  } catch (err) {
+    console.error('Error fetching account events:', err);
+    res.status(500).json({ error: 'Failed to fetch account events' });
+  }
+});
+
+app.post('/api/account-events/:id/assign-offer', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const eventResult = await client.query(
+      'SELECT * FROM account_events WHERE id = $1 AND person_id = $2 FOR UPDATE',
+      [req.params.id, req.body.personId]
+    );
+    if (!eventResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Account event not found' });
+    }
+    const event = eventResult.rows[0];
+    if (event.assigned_offer_credit_id) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Account event is already assigned' });
+    }
+    const offerResult = await client.query('SELECT id FROM offers WHERE id = $1 AND person_id = $2', [req.body.offerId, req.body.personId]);
+    if (!offerResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Offer not found for this card holder' });
+    }
+    const creditResult = await client.query(`
+      INSERT INTO offer_credits (offer_id, amount, posted_date, description)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [req.body.offerId, Math.abs(Number(event.amount)), event.event_date, event.description]);
+    await client.query('UPDATE account_events SET assigned_offer_credit_id = $1 WHERE id = $2', [creditResult.rows[0].id, event.id]);
+    await client.query('COMMIT');
+    res.json({ success: true, creditId: creditResult.rows[0].id });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error assigning account event:', err);
+    res.status(500).json({ error: 'Failed to assign account event' });
+  } finally {
+    client.release();
   }
 });
 
