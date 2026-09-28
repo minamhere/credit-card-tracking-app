@@ -1181,6 +1181,7 @@ button:hover {
 .import-message { min-height: 1.5rem; margin-top: 0.75rem; }
 .import-message.error { color: #c62828; }
 .import-message.success { color: #287d3c; }
+.import-message.warning { color: #856404; }
 
 .import-summary {
     display: flex;

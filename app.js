@@ -506,7 +506,14 @@ class OfferTracker {
             const result = await this.dataManager.dbManager.confirmTransactionImport(selected, this.importMetadata || {}, accountEvents);
             selected.flatMap(item => item.categories).forEach(category => this.addCategory(category));
             this.clearImportPreview();
-            this.setImportMessage(`Imported ${result.imported} purchases and ${result.eventsImported || 0} account events. ${result.skipped} rows were skipped.`, 'success');
+            const matched = result.autoMatchedCredits || [];
+            const matchText = matched.length
+                ? ` Automatically matched ${matched.length} credit${matched.length === 1 ? '' : 's'}: ${matched.map(item => `$${Number(item.amount).toFixed(2)} → ${item.offerName}`).join('; ')}.`
+                : '';
+            const unmatchedText = result.unmatchedOfferCredits
+                ? ` ${result.unmatchedOfferCredits} possible offer credit${result.unmatchedOfferCredits === 1 ? '' : 's'} still need manual review.`
+                : '';
+            this.setImportMessage(`Imported ${result.imported} purchases and ${result.eventsImported || 0} account events.${matchText}${unmatchedText} ${result.skipped} rows were skipped.`, result.unmatchedOfferCredits ? 'warning' : 'success');
             await this.renderTransactions();
             await this.renderDashboard();
             await this.renderMerchantRules();

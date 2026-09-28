@@ -6,6 +6,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const OfferEngine = require('./offer-engine');
 const OfferEmailParser = require('./offer-email-parser');
+const CreditMatcher = require('./credit-matcher');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -147,6 +148,60 @@ async function findDuplicateOffer(personId, fingerprint) {
   // repeated email, so derive their identity from their saved terms.
   const existing = await pool.query('SELECT * FROM offers WHERE person_id = $1', [personId]);
   return existing.rows.find(row => fingerprintForStoredOffer(row) === fingerprint) || null;
+}
+
+async function autoMatchOfferCredits(client, personId, events) {
+  if (!events.length) return [];
+  const offersResult = await client.query('SELECT * FROM offers WHERE person_id = $1', [personId]);
+  if (!offersResult.rows.length) return [];
+  const offerIds = offersResult.rows.map(row => row.id);
+  const transactionsResult = await client.query('SELECT * FROM transactions WHERE person_id = $1 ORDER BY date, id', [personId]);
+  const creditsResult = await client.query('SELECT * FROM offer_credits WHERE offer_id = ANY($1::int[]) ORDER BY posted_date, id', [offerIds]);
+  const transactions = transactionsResult.rows.map(row => ({
+    id: row.id,
+    date: row.date,
+    amount: Number(row.amount),
+    merchant: row.merchant,
+    categories: row.categories || [],
+    transactionType: row.transaction_type || 'purchase'
+  }));
+  const creditsByOffer = new Map(offerIds.map(id => [id, []]));
+  creditsResult.rows.forEach(row => creditsByOffer.get(row.offer_id).push({
+    id: row.id, amount: Number(row.amount), postedDate: row.posted_date, description: row.description
+  }));
+
+  const matches = [];
+  for (const event of events) {
+    const eventDate = String(event.date).slice(0, 10);
+    const candidates = offersResult.rows.map(row => {
+      const credits = creditsByOffer.get(row.id);
+      const offer = serializeOffer(row, credits);
+      const progress = OfferEngine.calculateOfferProgress(
+        offer,
+        transactions,
+        { asOf: new Date().toISOString().slice(0, 10) }
+      );
+      return { offer, progress };
+    });
+    const match = CreditMatcher.findCreditMatch(event, candidates);
+    if (!match.matched) continue;
+
+    const amount = Math.abs(Number(event.amount));
+    const creditResult = await client.query(`
+      INSERT INTO offer_credits (offer_id, amount, posted_date, description)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [match.offerId, amount, eventDate, event.description]);
+    await client.query('UPDATE account_events SET assigned_offer_credit_id = $1 WHERE id = $2', [creditResult.rows[0].id, event.id]);
+    creditsByOffer.get(match.offerId).push({
+      id: creditResult.rows[0].id,
+      amount,
+      postedDate: eventDate,
+      description: event.description
+    });
+    matches.push({ eventId: event.id, amount, offerId: match.offerId, offerName: match.offerName, reasons: match.reasons });
+  }
+  return matches;
 }
 
 // Run migrations on startup
@@ -660,6 +715,7 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
     let imported = 0;
     let eventsImported = 0;
     let skipped = 0;
+    const importedEvents = [];
     for (const item of transactions) {
       const amount = Number(item.amount);
       const merchant = String(item.merchant || '').trim();
@@ -721,12 +777,24 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
         ON CONFLICT (person_id, source_hash) DO NOTHING
         RETURNING id
       `, [personId, importBatchId, item.date, amount, description, eventType, hash]);
-      if (result.rows.length) eventsImported++;
+      if (result.rows.length) {
+        eventsImported++;
+        importedEvents.push({ id: result.rows[0].id, date: item.date, amount, description, eventType });
+      }
       else skipped++;
     }
+    const autoMatchedCredits = await autoMatchOfferCredits(client, personId, importedEvents);
+    const potentialOfferCredits = importedEvents.filter(event => CreditMatcher.isPotentialOfferCredit(event)).length;
     await client.query('UPDATE import_batches SET imported_count = $1 WHERE id = $2', [imported, importBatchId]);
     await client.query('COMMIT');
-    res.json({ imported, eventsImported, skipped, importBatchId });
+    res.json({
+      imported,
+      eventsImported,
+      skipped,
+      importBatchId,
+      autoMatchedCredits,
+      unmatchedOfferCredits: Math.max(potentialOfferCredits - autoMatchedCredits.length, 0)
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error importing transactions:', err);
