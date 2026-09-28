@@ -1218,6 +1218,8 @@ class OfferTracker {
             let totalEarned = 0;
             let totalPotential = 0;
             let activeOffers = 0;
+            let totalPosted = 0;
+            let reviewNeeded = 0;
 
             const offerCards = offers.map(offer => {
                 const progress = offer.progress;
@@ -1264,6 +1266,8 @@ class OfferTracker {
                     earned = Number(progress.earnedReward);
                 }
                 totalEarned += earned;
+                totalPosted += Number(progress.postedCredits || 0);
+                if (progress.reconciliation?.status === 'mismatch') reviewNeeded++;
 
                 // Determine tier badge
                 const getTierBadge = (offer) => {
@@ -1288,17 +1292,17 @@ class OfferTracker {
                 };
 
                 const transactionsHtml = offer.transactions.length > 0 ? `
-                    <div style="margin-top: 0.75rem; padding: 0.75rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 5px;">
-                        <strong style="font-size: 0.9em;">Qualifying Transactions (${offer.transactions.length}):</strong>
-                        <div style="margin-top: 0.5rem; max-height: 150px; overflow-y: auto; font-size: 0.85em;">
+                    <details class="dashboard-details">
+                        <summary>Qualifying transactions (${offer.transactions.length})</summary>
+                        <div class="dashboard-transaction-list">
                             ${offer.transactions.map(t => `
                                 <div style="padding: 0.25rem 0; border-bottom: 1px solid var(--border-color);">
-                                    ${formatDate(t.date)} • ${t.merchant} • <strong>$${t.amount.toFixed(2)}</strong>${t.categories && t.categories.length > 0 ? ` • ${t.categories.join(', ')}` : ''}
+                                    ${formatDate(t.date)} • ${this.escapeHtml(t.merchant)} • <strong>$${t.amount.toFixed(2)}</strong>${t.categories && t.categories.length > 0 ? ` • ${this.escapeHtml(t.categories.join(', '))}` : ''}
                                 </div>
                             `).join('')}
                         </div>
-                    </div>
-                ` : '<div style="margin-top: 0.75rem; padding: 0.5rem; background: #fff3cd; border-radius: 5px; color: #856404; font-size: 0.85em;"><em>No qualifying transactions yet</em></div>';
+                    </details>
+                ` : '<div class="dashboard-empty-note">No qualifying transactions yet</div>';
 
                 const reconciliation = progress.reconciliation;
                 const reviewRows = reconciliation && reconciliation.status === 'mismatch'
@@ -1318,74 +1322,97 @@ class OfferTracker {
                     </div>
                 ` : '';
 
+                const todayText = new Date().toISOString().slice(0, 10);
+                const focusPeriod = offer.monthlyTracking && progress.months
+                    ? (progress.months.find(month => month.periodStart <= todayText && month.periodEnd >= todayText)
+                        || progress.months.find(month => month.periodStart > todayText)
+                        || progress.months[progress.months.length - 1])
+                    : progress;
+                const focusSpend = Number(focusPeriod?.spending ?? progress.totalSpending ?? 0);
+                const focusEarned = Number(focusPeriod?.earnedReward ?? progress.expectedReward ?? 0);
+                const nextTarget = focusPeriod?.nextTarget;
+                const remaining = nextTarget == null ? 0 : Math.max(0, Number(nextTarget) - Number(focusPeriod?.metric ?? focusSpend));
+                const sortedTiers = [...(offer.tiers || [])].sort((a, b) => Number(a.threshold) - Number(b.threshold));
+                const nextTier = sortedTiers.find(tier => Number(tier.threshold) > Number(focusPeriod?.metric ?? focusSpend));
+                const categoriesText = (offer.eligibility?.includeCategories || offer.categories || []).join(', ') || 'eligible purchases';
+                let actionTitle = 'Keep tracking eligible purchases';
+                let actionDetail = `${categoriesText} count toward this offer.`;
+                if (offer.expired) {
+                    actionTitle = 'Offer ended';
+                    actionDetail = 'Review posted credits and reconciliation below.';
+                } else if (offer.notStarted) {
+                    actionTitle = 'Offer has not started';
+                    actionDetail = `Use ${categoriesText} purchases after the start date.`;
+                } else if (remaining > 0) {
+                    actionTitle = `Spend $${remaining.toFixed(2)} more`;
+                    actionDetail = nextTier
+                        ? `Reach $${Number(nextTier.threshold).toFixed(2)} in ${categoriesText} to earn $${Number(nextTier.reward).toFixed(2)}.`
+                        : `Reach the next reward point with ${categoriesText}.`;
+                } else if (focusPeriod?.completed) {
+                    actionTitle = 'Current goal reached';
+                    actionDetail = `Expected reward for this period: $${focusEarned.toFixed(2)}.`;
+                }
+
                 return `
-                    <div class="offer-card">
-                        <div style="margin-bottom: 0.5rem;">
-                            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 0.5rem; margin-bottom: 0.25rem;">
-                                <div class="offer-name" style="margin-bottom: 0.25rem; flex: 1 1 60%; min-width: 200px;">${offer.name}</div>
-                                <div style="flex: 0 1 auto; text-align: right; white-space: nowrap;">
-                                    <div style="font-size: 1.1em; font-weight: bold;">
-                                        ${offer.type === 'percent-back' ?
-                                            (offer.maxBack ?
-                                                (offer.monthlyTracking && progress.months ?
-                                                    `Max: $${offer.maxBack}/mo × ${progress.months.length} = $${(offer.maxBack * progress.months.length).toFixed(2)}` :
-                                                    `Max: $${offer.maxBack}`) :
-                                                `${offer.percentBack}% back`) :
-                                            (offer.monthlyTracking && progress.months ?
-                                                `$${offer.reward}/mo × ${progress.months.length}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''} = $${(offer.reward * progress.months.length) + (offer.bonusReward || 0)}` :
-                                                `$${offer.reward}${offer.bonusReward ? ` + $${offer.bonusReward}` : ''}`)
-                                        }
-                                    </div>
-                                    <div style="font-size: 0.8em; color: var(--text-secondary);">Expected: $${Number(progress.expectedReward ?? earned).toFixed(2)}</div>
-                                    <div style="font-size: 0.8em; color: var(--text-secondary);">Posted: $${Number(progress.postedCredits || 0).toFixed(2)} · Outstanding: $${Number(progress.outstandingReward ?? earned).toFixed(2)}</div>
-                                </div>
+                    <article class="offer-card dashboard-offer-card">
+                        <div class="dashboard-offer-header">
+                            <div>
+                                <div class="offer-name">${this.escapeHtml(offer.name)}</div>
+                                <div class="dashboard-offer-meta">${offer.startDate.toLocaleDateString()}–${offer.endDate.toLocaleDateString()} · ${this.escapeHtml(categoriesText)}</div>
                             </div>
-                            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                                <span style="background: ${tierBadge.color}; color: white; padding: 0.2rem 0.5rem; border-radius: 3px; font-weight: bold; font-size: 0.75em;">
-                                    ${tierBadge.text}
-                                </span>
-                                <span class="status-badge status-${progress.status}" style="font-size: 0.75em; padding: 0.2rem 0.5rem;">${progress.status.toUpperCase()}</span>
-                                <span class="offer-type-badge" style="font-size: 0.75em; padding: 0.2rem 0.5rem;">${this.getOfferTypeLabel(offer)}</span>
-                            </div>
+                            <span class="dashboard-state dashboard-state-${progress.status}">${progress.status}</span>
                         </div>
-                        <div style="display: flex; justify-content: space-between; font-size: 0.85em; color: var(--text-secondary); margin-bottom: 0.5rem;">
-                            <div>${offer.startDate.toLocaleDateString()} - ${offer.endDate.toLocaleDateString()}</div>
-                            <div>${offer.expired ? `Expired ${Math.abs(offer.daysUntilExpiration)}d ago` :
-                                  offer.notStarted ? `Starts in ${offer.daysUntilExpiration}d` :
-                                  `${offer.daysUntilExpiration}d left`}</div>
+                        <div class="dashboard-action">
+                            <div class="dashboard-action-label">Next action</div>
+                            <div class="dashboard-action-title">${actionTitle}</div>
+                            <div class="dashboard-action-detail">${this.escapeHtml(actionDetail)}</div>
                         </div>
-                        <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 0.5rem;">${offer.description}</div>
+                        <div class="dashboard-metrics">
+                            <div><span>Qualifying spend</span><strong>$${focusSpend.toFixed(2)}</strong></div>
+                            <div><span>Expected credit</span><strong>$${Number(progress.expectedReward ?? earned).toFixed(2)}</strong></div>
+                            <div><span>Posted credit</span><strong>$${Number(progress.postedCredits || 0).toFixed(2)}</strong></div>
+                        </div>
                         ${reconciliationHtml}
-                        ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
+                        <details class="dashboard-details">
+                            <summary>Progress history and offer details</summary>
+                            <p>${this.escapeHtml(offer.description || '')}</p>
+                            ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
+                        </details>
                         ${transactionsHtml}
-                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                            <button class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.85em; margin: 0;" onclick="tracker.recordOfferCredit(${offer.id})">Record statement credit</button>
-                            ${offer.bonusReward && !offer.bonusPosted ? `<button class="btn-primary" style="padding: 0.3rem 0.6rem; font-size: 0.85em; margin: 0;" onclick="tracker.markBonusPosted(${offer.id})">Mark Bonus Posted</button>` : ''}
+                        <div class="dashboard-card-actions">
+                            <button class="btn-secondary" onclick="tracker.recordOfferCredit(${offer.id})">Record statement credit</button>
+                            ${offer.bonusReward && !offer.bonusPosted ? `<button class="btn-primary" onclick="tracker.markBonusPosted(${offer.id})">Mark Bonus Posted</button>` : ''}
                             ${offer.bonusReward && offer.bonusPosted ? `<span style="font-size: 0.85em; color: #28a745; font-weight: bold;">✓ Bonus Posted${offer.bonusPostedDate ? ` on ${new Date(offer.bonusPostedDate).toLocaleDateString()}` : ''}</span>` : ''}
-                            ${offer.expired || progress.status === 'completed' ? `<button class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.85em; margin: 0;" onclick="tracker.hideOffer(${offer.id})">Hide Offer</button>` : ''}
+                            ${offer.expired || progress.status === 'completed' ? `<button class="btn-secondary" onclick="tracker.hideOffer(${offer.id})">Hide Offer</button>` : ''}
                         </div>
-                    </div>
+                    </article>
                 `;
             });
 
             const summary = `
+                <div class="dashboard-heading">
+                    <div><h2>Reward dashboard</h2><p>What to do next and whether Citi paid what you expected.</p></div>
+                    ${reviewNeeded ? `<div class="dashboard-review-callout">⚠ ${reviewNeeded} offer${reviewNeeded === 1 ? '' : 's'} need review</div>` : ''}
+                </div>
                 <div class="dashboard-summary">
                     <div class="summary-card">
                         <div class="summary-value">$${totalEarned.toFixed(2)}</div>
-                        <div class="summary-label">Total Earned</div>
+                        <div class="summary-label">Expected credits</div>
                     </div>
                     <div class="summary-card">
-                        <div class="summary-value">$${totalPotential.toFixed(2)}</div>
-                        <div class="summary-label">Total Potential</div>
+                        <div class="summary-value">$${totalPosted.toFixed(2)}</div>
+                        <div class="summary-label">Credits posted</div>
                     </div>
                     <div class="summary-card">
                         <div class="summary-value">${activeOffers}</div>
                         <div class="summary-label">Active Offers</div>
                     </div>
+                    <div class="summary-card ${reviewNeeded ? 'summary-card-alert' : ''}">
+                        <div class="summary-value">${reviewNeeded}</div>
+                        <div class="summary-label">Need review</div>
+                    </div>
                 </div>
-                <div style="margin-top: 2rem;">
-                    <h2 style="color: #155724; margin-bottom: 1rem;">📊 Offers (Sorted by Priority)</h2>
-                </div>
+                <h2 class="dashboard-section-title">Offers needing your attention first</h2>
             `;
 
             // Hidden offers section

@@ -423,6 +423,8 @@ class DataManager {
                 // Tier 5: Upcoming (not started)
 
                 const getTier = (offer) => {
+                    if (offer.progress?.reconciliation?.status === 'mismatch') return 0;
+
                     // For monthly offers with no actionable months, treat as effectively done
                     if (offer.monthlyTracking && !offer.hasActionableMonths) {
                         return offer.isComplete ? 3 : 4; // Archived success or missed opportunity

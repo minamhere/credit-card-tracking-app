@@ -431,6 +431,45 @@ button:hover {
     opacity: 0.9;
 }
 
+.dashboard-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.dashboard-heading h2 { margin: 0 0 0.25rem; }
+.dashboard-heading p { margin: 0; color: var(--text-secondary); }
+.dashboard-review-callout { padding: 0.55rem 0.75rem; border-radius: 6px; background: #f8d7da; color: #721c24; font-weight: 700; }
+.dashboard-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dashboard-summary .summary-card { padding: 1rem; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); text-align: left; }
+.dashboard-summary .summary-value { font-size: 1.65rem; margin-bottom: 0.15rem; }
+.dashboard-summary .summary-label { color: var(--text-secondary); }
+.dashboard-summary .summary-card-alert { border-color: #dc3545; background: rgba(220, 53, 69, 0.1); }
+.dashboard-section-title { margin: 0 0 0.8rem; font-size: 1.15rem; color: var(--text-primary); }
+.dashboard-offer-card { border-width: 1px; padding: 1.1rem; }
+.dashboard-offer-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.dashboard-offer-meta { margin-top: 0.2rem; color: var(--text-secondary); font-size: 0.82rem; text-transform: capitalize; }
+.dashboard-state { flex: 0 0 auto; padding: 0.25rem 0.55rem; border-radius: 999px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; background: var(--bg-tertiary); }
+.dashboard-state-active { color: #155724; background: #d4edda; }
+.dashboard-state-upcoming { color: #0c5460; background: #d1ecf1; }
+.dashboard-state-expired { color: var(--text-secondary); }
+.dashboard-action { margin: 0.9rem 0; padding: 0.8rem 0.9rem; border-left: 4px solid var(--button-primary); background: var(--bg-secondary); border-radius: 4px; }
+.dashboard-action-label { color: var(--text-secondary); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.dashboard-action-title { margin: 0.15rem 0; font-size: 1.15rem; font-weight: 700; color: var(--text-primary); }
+.dashboard-action-detail { color: var(--text-secondary); font-size: 0.84rem; }
+.dashboard-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.7rem; }
+.dashboard-metrics > div { padding: 0.6rem; border: 1px solid var(--border-color); border-radius: 5px; }
+.dashboard-metrics span, .dashboard-metrics strong { display: block; }
+.dashboard-metrics span { margin-bottom: 0.15rem; color: var(--text-secondary); font-size: 0.72rem; }
+.dashboard-metrics strong { font-size: 1rem; }
+.dashboard-details { margin-top: 0.55rem; padding: 0.55rem 0; border-top: 1px solid var(--border-color); }
+.dashboard-details summary { cursor: pointer; color: var(--text-secondary); font-size: 0.84rem; font-weight: 600; }
+.dashboard-transaction-list { max-height: 180px; overflow-y: auto; margin-top: 0.5rem; font-size: 0.82rem; }
+.dashboard-empty-note { margin-top: 0.55rem; color: var(--text-secondary); font-size: 0.8rem; font-style: italic; }
+.dashboard-card-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.7rem; padding-top: 0.7rem; border-top: 1px solid var(--border-color); }
+.dashboard-card-actions button { margin: 0; padding: 0.35rem 0.6rem; font-size: 0.8rem; }
+
 .modal {
     display: none;
     position: fixed;
@@ -1201,6 +1240,9 @@ button:hover {
     .merchant-rule span { grid-column: 1 / -1; grid-row: 2; }
     .account-event { grid-template-columns: 1fr auto; }
     .account-event span, .account-event select { grid-column: 1 / -1; }
+    .dashboard-heading { flex-direction: column; }
+    .dashboard-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dashboard-metrics { grid-template-columns: 1fr; }
 }
 
 /* Custom Category Input */
