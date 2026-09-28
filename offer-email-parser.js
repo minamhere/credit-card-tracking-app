@@ -19,11 +19,15 @@
         const tiers = [];
         const patterns = [
             /(?:get|earn|receive)\s+\$([\d,]+(?:\.\d{1,2})?).{0,100}?(?:spend|purchases? (?:of|totaling))\s+\$([\d,]+(?:\.\d{1,2})?)/gi,
-            /(?:spend|purchases? (?:of|totaling))\s+\$([\d,]+(?:\.\d{1,2})?).{0,100}?(?:get|earn|receive)\s+\$([\d,]+(?:\.\d{1,2})?)/gi
+            /(?:spend|purchases? (?:of|totaling))\s+\$([\d,]+(?:\.\d{1,2})?).{0,100}?(?:get|earn|receive)\s+\$([\d,]+(?:\.\d{1,2})?)/gi,
+            /\$([\d,]+(?:\.\d{1,2})?)\s+statement credit.{0,180}?(?:spend|totaling)\s+\$([\d,]+(?:\.\d{1,2})?)/gi,
+            /earn(?: back)?(?: a)?\s*\$([\d,]+(?:\.\d{1,2})?)\s+statement credit.{0,180}?totaling\s+\$([\d,]+(?:\.\d{1,2})?)/gi
         ];
         let match;
         while ((match = patterns[0].exec(text))) tiers.push({ threshold: money(match[2]), reward: money(match[1]) });
         while ((match = patterns[1].exec(text))) tiers.push({ threshold: money(match[1]), reward: money(match[2]) });
+        while ((match = patterns[2].exec(text))) tiers.push({ threshold: money(match[2]), reward: money(match[1]) });
+        while ((match = patterns[3].exec(text))) tiers.push({ threshold: money(match[2]), reward: money(match[1]) });
         return unique(tiers.map(tier => `${tier.threshold}:${tier.reward}`))
             .map(value => { const [threshold, reward] = value.split(':').map(Number); return { threshold, reward }; })
             .sort((a, b) => a.threshold - b.threshold);
@@ -42,15 +46,18 @@
         const accountMatch = text.match(/Account ending in:\s*(\d{4})/i);
         const monthly = /(?:each|per|this) month/i.test(text.slice(0, 5000));
         const capMatch = text.match(/maximum total of\s+\$([\d,]+(?:\.\d{1,2})?)/i) || text.match(/up to (?:a maximum total of )?\$([\d,]+(?:\.\d{1,2})?)/i);
-        const thresholdMatch = text.slice(0, 5000).match(/(?:if|when) you (?:make|spend).{0,80}?\$([\d,]+(?:\.\d{1,2})?)/i);
+        const offerSummary = text.slice(0, 5000);
+        const thresholdMatch = offerSummary.match(/(?:if|when) you (?:make|spend).{0,80}?\$([\d,]+(?:\.\d{1,2})?)/i)
+            || offerSummary.match(/spend\s+\$([\d,]+(?:\.\d{1,2})?)\s+or more each month/i)
+            || offerSummary.match(/eligible purchases.{0,100}?total\s+\$([\d,]+(?:\.\d{1,2})?)\s+or more each month/is);
         const tiers = parseTiers(text.slice(0, 8000));
 
         let categories = [];
         let categoryLabel = 'Qualifying Purchases';
-        if (/eligible retail purchases/i.test(text)) {
+        if (/eligible retail purchases/i.test(offerSummary)) {
             categories = ['retail'];
             categoryLabel = 'Retail Purchases';
-        } else if (/gas.{0,20}grocery.{0,30}restaurant|gas station.{0,30}grocery.{0,30}restaurant/is.test(text.slice(0, 5000))) {
+        } else if (/eligible gas station,?\s*grocery store and restaurant purchases|eligible gas station.{0,30}grocery store.{0,30}restaurant purchases/is.test(offerSummary)) {
             categories = ['gas', 'grocery', 'restaurant'];
             categoryLabel = 'Gas, Grocery, and Restaurant';
         }
@@ -68,7 +75,7 @@
         const startDate = dateMatch ? isoDate(dateMatch[1]) : null;
         const endDate = dateMatch ? isoDate(dateMatch[2]) : (endOnlyMatch ? isoDate(endOnlyMatch[1]) : null);
         const warnings = [];
-        if (/or the date you activate this offer, whichever is later/i.test(text)) {
+        if (/or the date you activate(?:d)? this offer, whichever is later/i.test(text)) {
             warnings.push('The effective start date is the later of the stated date and activation date. Verify the activation date.');
         }
         if (!startDate) warnings.push('Start date was not found.');
