@@ -1223,17 +1223,30 @@ class OfferTracker {
             try {
                 const events = await this.dataManager.dbManager.getAccountEvents();
                 let matched = 0;
-                for (const event of events.filter(item => !item.assignedOfferCreditId)) {
-                    const match = CreditMatcher.findCreditMatch(event, allOffers.map(offer => ({ offer, progress: offer.progress })));
-                    if (!match.matched) continue;
-                    await this.dataManager.dbManager.assignAccountEvent(event.id, match.offerId);
-                    matched++;
-                    const matchedOffer = allOffers.find(offer => Number(offer.id) === Number(match.offerId));
-                    if (matchedOffer) {
-                        matchedOffer.credits = [...(matchedOffer.credits || []), { amount: Math.abs(Number(event.amount)), postedDate: event.date, description: event.description }];
-                        matchedOffer.progress.postedCredits = Number(matchedOffer.progress.postedCredits || 0) + Math.abs(Number(event.amount));
+                let pendingEvents = events
+                    .filter(item => !item.assignedOfferCreditId)
+                    .sort((a, b) => Number(a.id) - Number(b.id));
+                let matchedThisPass = 0;
+                do {
+                    matchedThisPass = 0;
+                    const stillPending = [];
+                    for (const event of pendingEvents) {
+                        const match = CreditMatcher.findCreditMatch(event, allOffers.map(offer => ({ offer, progress: offer.progress })));
+                        if (!match.matched) {
+                            stillPending.push(event);
+                            continue;
+                        }
+                        await this.dataManager.dbManager.assignAccountEvent(event.id, match.offerId);
+                        matched++;
+                        matchedThisPass++;
+                        const matchedOffer = allOffers.find(offer => Number(offer.id) === Number(match.offerId));
+                        if (matchedOffer) {
+                            matchedOffer.credits = [...(matchedOffer.credits || []), { amount: Math.abs(Number(event.amount)), postedDate: event.date, description: event.description }];
+                            matchedOffer.progress.postedCredits = Number(matchedOffer.progress.postedCredits || 0) + Math.abs(Number(event.amount));
+                        }
                     }
-                }
+                    pendingEvents = stillPending;
+                } while (matchedThisPass > 0 && pendingEvents.length > 0);
                 if (matched) allOffers = await this.dataManager.getSimplifiedOfferList();
             } catch (error) {
                 console.warn('Credit auto-match skipped:', error);

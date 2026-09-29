@@ -59,6 +59,29 @@ test('explains the transaction and spend behind a percentage checkpoint', () => 
     assert.equal(checkpoints[1].transaction.merchant, 'King Soopers');
 });
 
+test('matches an incremental percentage credit after an earlier credit posts', () => {
+    const result = findCreditMatch(
+        { ...event, amount: -14.44 },
+        [{
+            offer: {
+                id: 1, name: '8% offer', measurement: { period: 'monthly' },
+                rewardConfig: { kind: 'percentage', rate: 8, activationThreshold: 900, cap: 90 }
+            },
+            progress: {
+                expectedReward: 89.73,
+                postedCredits: 75.29,
+                eligibleTransactions: [
+                    { id: 1, date: '2026-09-11', amount: 853.68 },
+                    { id: 2, date: '2026-09-12', amount: 87.40 },
+                    { id: 3, date: '2026-09-20', amount: 180.60 }
+                ]
+            }
+        }]
+    );
+    assert.equal(result.matched, true);
+    assert.equal(result.offerId, 1);
+});
+
 test('does not treat card payments as offer credits', () => {
     assert.equal(isPotentialOfferCredit({ description: 'AUTOPAY PAYMENT THANK YOU', eventType: 'payment' }), false);
 });

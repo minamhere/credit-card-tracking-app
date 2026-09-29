@@ -171,36 +171,37 @@ async function autoMatchOfferCredits(client, personId, events) {
   }));
 
   const matches = [];
-  for (const event of events) {
-    const eventDate = String(event.date).slice(0, 10);
-    const candidates = offersResult.rows.map(row => {
-      const credits = creditsByOffer.get(row.id);
-      const offer = serializeOffer(row, credits);
-      const progress = OfferEngine.calculateOfferProgress(
-        offer,
-        transactions,
-        { asOf: new Date().toISOString().slice(0, 10) }
-      );
-      return { offer, progress };
-    });
-    const match = CreditMatcher.findCreditMatch(event, candidates);
-    if (!match.matched) continue;
+  let pendingEvents = [...events].sort((a, b) => Number(a.id) - Number(b.id));
+  let matchedThisPass = 0;
+  do {
+    matchedThisPass = 0;
+    const stillPending = [];
+    for (const event of pendingEvents) {
+      const eventDate = String(event.date).slice(0, 10);
+      const candidates = offersResult.rows.map(row => {
+        const offer = serializeOffer(row, creditsByOffer.get(row.id));
+        const progress = OfferEngine.calculateOfferProgress(offer, transactions, { asOf: new Date().toISOString().slice(0, 10) });
+        return { offer, progress };
+      });
+      const match = CreditMatcher.findCreditMatch(event, candidates);
+      if (!match.matched) {
+        stillPending.push(event);
+        continue;
+      }
 
-    const amount = Math.abs(Number(event.amount));
-    const creditResult = await client.query(`
-      INSERT INTO offer_credits (offer_id, amount, posted_date, description)
-      VALUES ($1, $2, $3, $4)
-      RETURNING *
-    `, [match.offerId, amount, eventDate, event.description]);
-    await client.query('UPDATE account_events SET assigned_offer_credit_id = $1 WHERE id = $2', [creditResult.rows[0].id, event.id]);
-    creditsByOffer.get(match.offerId).push({
-      id: creditResult.rows[0].id,
-      amount,
-      postedDate: eventDate,
-      description: event.description
-    });
-    matches.push({ eventId: event.id, amount, offerId: match.offerId, offerName: match.offerName, reasons: match.reasons });
-  }
+      const amount = Math.abs(Number(event.amount));
+      const creditResult = await client.query(`
+        INSERT INTO offer_credits (offer_id, amount, posted_date, description)
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+      `, [match.offerId, amount, eventDate, event.description]);
+      await client.query('UPDATE account_events SET assigned_offer_credit_id = $1 WHERE id = $2', [creditResult.rows[0].id, event.id]);
+      creditsByOffer.get(match.offerId).push({ id: creditResult.rows[0].id, amount, postedDate: eventDate, description: event.description });
+      matches.push({ eventId: event.id, amount, offerId: match.offerId, offerName: match.offerName, reasons: match.reasons });
+      matchedThisPass++;
+    }
+    pendingEvents = stillPending;
+  } while (matchedThisPass > 0 && pendingEvents.length > 0);
   return matches;
 }
 
