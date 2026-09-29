@@ -32,6 +32,21 @@ test('ignores a forwarded Citi promotional APR email', () => {
     assert.equal(result.parsedOffer, null);
 });
 
+test('offer terms take priority over incidental APR boilerplate', () => {
+    const result = classifyMessage(forwardedMessage(
+        "Fw: Christopher, you've activated – now earn back a statement credit (after you make qualifying spend)!",
+        `<p>From: Citi &lt;citi@info15.citi.com&gt;</p>
+         <p>Citi ThankYou Mastercard</p>
+         <p>Earn a $80 statement credit when you spend $1,000 each month on eligible gas station, grocery store and restaurant purchases.</p>
+         <p>Only purchases made from 1/1/2026 through 12/31/2026 qualify.</p>
+         <p>Annual Percentage Rate information may be found in your card agreement.</p>
+         <p>Security Zone: Christopher Nolan</p><p>Account ending in: 1886</p>`
+    ));
+    assert.equal(result.classification, 'offer_reminder');
+    assert.equal(result.status, 'review');
+    assert.equal(result.parsedOffer.tiers[0].reward, 80);
+});
+
 test('ignores unrelated forwarded mail', () => {
     const result = classifyMessage(forwardedMessage('FW: Weekly newsletter', '<p>Here are this week’s updates.</p>'));
     assert.equal(result.classification, 'non_citi');

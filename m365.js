@@ -86,7 +86,10 @@ function classifyMessage(message) {
   const bodyText = htmlToText(message.body?.content || '');
   const combined = `${subject}\n${bodyText}`;
   const sender = String(message.from?.emailAddress?.address || '').toLowerCase();
-  if (/promotional apr|promo apr|annual percentage rate|balance transfer|flex loan/i.test(combined)) {
+  // Explicit statement-credit language wins over incidental financing text
+  // that can appear in forwarded threads, footers, or Citi boilerplate.
+  const hasOfferTerms = /earn\s+\d+(?:\.\d+)?%\s+back|\$\s*[\d,]+(?:\.\d+)?\s+statement credit|statement credits?[\s\S]{0,160}(?:when|after)\s+you\s+(?:spend|make)/i.test(combined);
+  if (!hasOfferTerms && /promotional apr|promo apr|annual percentage rate|balance transfer|flex loan/i.test(combined)) {
     return { classification: 'non_offer', status: 'ignored', bodyText, parsedOffer: null, reason: 'APR or financing promotion' };
   }
   // Forwarded messages come from the cardholder, so also look for Citi's
@@ -97,11 +100,49 @@ function classifyMessage(message) {
   }
   try {
     const parsedOffer = OfferEmailParser.parseOfferEmail(combined);
-    const reminder = /already activated|thank you for activating|check your progress|keep going|you.ve spent/i.test(combined);
+    const reminder = /already activated|you.ve activated|thank you for activating|check your progress|keep going|you.ve spent/i.test(combined);
     return { classification: reminder ? 'offer_reminder' : 'offer', status: 'review', bodyText, parsedOffer, reason: reminder ? 'Recognized offer reminder' : 'Recognized offer terms' };
   } catch (error) {
     return { classification: 'uncertain', status: 'review', bodyText, parsedOffer: null, reason: error.message };
   }
+}
+
+async function reclassifyPreviouslyIgnored(pool) {
+  const result = await pool.query(`
+    SELECT id, person_id, sender, subject, body_text
+    FROM email_ingestions
+    WHERE processing_status = 'ignored' AND classification IN ('non_offer', 'non_citi')
+  `);
+  let changed = 0;
+  for (const row of result.rows) {
+    const classified = classifyMessage({
+      subject: row.subject,
+      from: { emailAddress: { address: row.sender } },
+      body: { content: row.body_text }
+    });
+    if (classified.status === 'ignored') continue;
+    let linkedOfferId = null;
+    let processingStatus = classified.status;
+    if (row.person_id && classified.parsedOffer?.fingerprint) {
+      const existing = await pool.query(
+        'SELECT id FROM offers WHERE person_id = $1 AND offer_fingerprint = $2 ORDER BY id LIMIT 1',
+        [row.person_id, classified.parsedOffer.fingerprint]
+      );
+      if (existing.rows.length) {
+        linkedOfferId = existing.rows[0].id;
+        processingStatus = 'linked';
+      }
+    }
+    await pool.query(`
+      UPDATE email_ingestions
+      SET classification=$1, processing_status=$2, parsed_offer=$3, offer_fingerprint=$4,
+          linked_offer_id=$5, classification_reason=$6, updated_at=CURRENT_TIMESTAMP
+      WHERE id=$7
+    `, [classified.classification, processingStatus, JSON.stringify(classified.parsedOffer),
+      classified.parsedOffer?.fingerprint || null, linkedOfferId, classified.reason, row.id]);
+    changed++;
+  }
+  return changed;
 }
 
 async function syncFolder(pool, config, token, folderPath) {
@@ -158,9 +199,10 @@ async function syncFolder(pool, config, token, folderPath) {
 async function syncAll(pool) {
   const config = configFromEnv();
   const token = await acquireToken(config);
+  await reclassifyPreviouslyIgnored(pool);
   const results = [];
   for (const folder of config.folders) results.push(await syncFolder(pool, config, token, folder));
   return results;
 }
 
-module.exports = { configFromEnv, validateConfig, acquireToken, graphGet, findFolder, classifyMessage, syncAll };
+module.exports = { configFromEnv, validateConfig, acquireToken, graphGet, findFolder, classifyMessage, reclassifyPreviouslyIgnored, syncAll };
