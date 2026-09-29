@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { findCreditMatch, isPotentialOfferCredit } = require('../credit-matcher');
+const { findCreditMatch, isPotentialOfferCredit, percentageCheckpointDetails } = require('../credit-matcher');
 
 const event = { date: '2026-09-12', amount: -75.29, description: 'Statement Credit', eventType: 'specific credit amount adjustment' };
 
@@ -44,6 +44,19 @@ test('matches a backdated percentage credit to an earlier spend checkpoint', () 
     assert.equal(result.matched, true);
     assert.equal(result.offerId, 1);
     assert.match(result.reasons[0], /checkpoint/);
+});
+
+test('explains the transaction and spend behind a percentage checkpoint', () => {
+    const checkpoints = percentageCheckpointDetails(
+        { measurement: { period: 'monthly' }, rewardConfig: { kind: 'percentage', rate: 8, activationThreshold: 900, cap: 90 } },
+        { postedCredits: 0, eligibleTransactions: [
+            { id: 1, date: '2026-09-11', amount: 853.68, merchant: 'Chilis' },
+            { id: 2, date: '2026-09-12', amount: 87.40, merchant: 'King Soopers' }
+        ] }
+    );
+    assert.equal(checkpoints[1].amount, 75.29);
+    assert.equal(checkpoints[1].qualifyingSpend, 941.08);
+    assert.equal(checkpoints[1].transaction.merchant, 'King Soopers');
 });
 
 test('does not treat card payments as offer credits', () => {

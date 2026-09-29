@@ -6,7 +6,7 @@
     const money = value => Math.round(Number(value || 0) * 100) / 100;
     const close = (a, b) => Math.abs(money(a) - money(b)) <= 0.02;
 
-    function percentageCheckpoints(offer, progress) {
+    function percentageCheckpointDetails(offer, progress) {
         const reward = offer.rewardConfig || {};
         if (reward.kind !== 'percentage' || !Number(reward.rate)) return [];
         const rate = Number(reward.rate) / 100;
@@ -25,9 +25,18 @@
             const totalExpected = [...periodSpend.values()].reduce((sum, spend) => {
                 return sum + (spend >= threshold ? Math.min(spend * rate, cap) : 0);
             }, 0);
-            checkpoints.push(money(Math.max(totalExpected - posted, 0)));
+            checkpoints.push({
+                amount: money(Math.max(totalExpected - posted, 0)),
+                expectedReward: money(totalExpected),
+                qualifyingSpend: money([...periodSpend.values()].reduce((sum, spend) => sum + spend, 0)),
+                transaction
+            });
         }
         return checkpoints;
+    }
+
+    function percentageCheckpoints(offer, progress) {
+        return percentageCheckpointDetails(offer, progress).map(checkpoint => checkpoint.amount);
     }
 
     function isPotentialOfferCredit(event) {
@@ -89,5 +98,5 @@
             : { matched: false, reason: best ? 'ambiguous offer credit' : 'no matching offer', rankings };
     }
 
-    return { isPotentialOfferCredit, percentageCheckpoints, scoreCandidate, findCreditMatch };
+    return { isPotentialOfferCredit, percentageCheckpointDetails, percentageCheckpoints, scoreCandidate, findCreditMatch };
 });

@@ -1228,6 +1228,14 @@ class OfferTracker {
             let totalPosted = 0;
             let reviewNeeded = 0;
 
+            const transactionOfferNames = new Map();
+            offers.forEach(offer => (offer.transactions || []).forEach(transaction => {
+                if (!transaction.id) return;
+                const names = transactionOfferNames.get(transaction.id) || [];
+                names.push(offer.name);
+                transactionOfferNames.set(transaction.id, names);
+            }));
+
             const offerCards = offers.map(offer => {
                 const progress = offer.progress;
 
@@ -1300,13 +1308,16 @@ class OfferTracker {
 
                 const transactionsHtml = offer.transactions.length > 0 ? `
                     <details class="dashboard-details">
-                        <summary>Qualifying transactions (${offer.transactions.length})</summary>
+                        <summary>Purchases behind this expected credit (${offer.transactions.length})</summary>
                         <div class="dashboard-transaction-list">
-                            ${offer.transactions.map(t => `
-                                <div style="padding: 0.25rem 0; border-bottom: 1px solid var(--border-color);">
-                                    ${formatDate(t.date)} • ${this.escapeHtml(t.merchant)} • <strong>$${t.amount.toFixed(2)}</strong>${t.categories && t.categories.length > 0 ? ` • ${this.escapeHtml(t.categories.join(', '))}` : ''}
+                            ${offer.transactions.map(t => {
+                                const overlapping = (transactionOfferNames.get(t.id) || []).filter(name => name !== offer.name);
+                                return `
+                                <div class="dashboard-credit-transaction">
+                                    <div>${formatDate(t.date)} • ${this.escapeHtml(t.merchant)} • <strong>$${t.amount.toFixed(2)}</strong>${t.categories && t.categories.length > 0 ? ` • ${this.escapeHtml(t.categories.join(', '))}` : ''}</div>
+                                    ${overlapping.length ? `<small>Also counts toward: ${this.escapeHtml(overlapping.join(', '))}</small>` : ''}
                                 </div>
-                            `).join('')}
+                            `; }).join('')}
                         </div>
                     </details>
                 ` : '<div class="dashboard-empty-note">No qualifying transactions yet</div>';
@@ -1342,6 +1353,29 @@ class OfferTracker {
                 const sortedTiers = [...(offer.tiers || [])].sort((a, b) => Number(a.threshold) - Number(b.threshold));
                 const nextTier = sortedTiers.find(tier => Number(tier.threshold) > Number(focusPeriod?.metric ?? focusSpend));
                 const categoriesText = (offer.eligibility?.includeCategories || offer.categories || []).join(', ') || 'eligible purchases';
+                let postedBefore = 0;
+                const postedCreditRows = [...(offer.credits || [])].sort((a, b) => Number(a.id) - Number(b.id)).map(credit => {
+                    const amount = Number(credit.amount || 0);
+                    const checkpoints = CreditMatcher.percentageCheckpointDetails(offer, { ...progress, postedCredits: postedBefore });
+                    const checkpoint = checkpoints.find(item => Math.abs(Number(item.amount) - amount) <= 0.02);
+                    postedBefore += amount;
+                    const matchingMonth = (progress.months || []).find(month => Math.abs(Number(month.earnedReward || 0) - amount) <= 0.02);
+                    const matchDetail = checkpoint
+                        ? `Matches $${checkpoint.qualifyingSpend.toFixed(2)} qualifying spend through ${checkpoint.transaction.merchant}.`
+                        : matchingMonth
+                            ? `Matches the expected reward for ${matchingMonth.month}.`
+                            : (Math.abs(amount - Number(progress.expectedReward || 0)) <= 0.02 ? 'Matches the current expected reward.' : 'No exact purchase checkpoint found yet.');
+                    return `
+                        <div class="posted-credit-row">
+                            <div class="posted-credit-amount">+$${amount.toFixed(2)}</div>
+                            <div><strong>${this.escapeHtml(credit.description || 'Statement credit')}</strong><small>${credit.postedDate ? `Citi date ${this.escapeHtml(String(credit.postedDate).slice(0, 10))} (may be backdated)` : 'Posting date unavailable'} · ${this.escapeHtml(matchDetail)}</small></div>
+                        </div>`;
+                }).join('');
+                const postedCreditsHtml = `
+                    <section class="posted-credits">
+                        <div class="posted-credits-heading"><strong>Actually posted</strong><span>${(offer.credits || []).length} credit${(offer.credits || []).length === 1 ? '' : 's'}</span></div>
+                        ${postedCreditRows || '<div class="posted-credit-empty">No statement credit has posted or been assigned to this offer yet.</div>'}
+                    </section>`;
                 let actionTitle = 'Keep tracking eligible purchases';
                 let actionDetail = `${categoriesText} count toward this offer.`;
                 if (offer.expired) {
@@ -1379,6 +1413,7 @@ class OfferTracker {
                             <div><span>Expected credit</span><strong>$${Number(progress.expectedReward ?? earned).toFixed(2)}</strong></div>
                             <div><span>Posted credit</span><strong>$${Number(progress.postedCredits || 0).toFixed(2)}</strong></div>
                         </div>
+                        ${postedCreditsHtml}
                         ${reconciliationHtml}
                         <details class="dashboard-details">
                             <summary>Progress history and offer details</summary>
