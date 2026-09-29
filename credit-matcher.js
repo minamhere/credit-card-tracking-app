@@ -39,6 +39,43 @@
         return percentageCheckpointDetails(offer, progress).map(checkpoint => checkpoint.amount);
     }
 
+    function percentagePurchaseDetails(offer, progress) {
+        const reward = offer.rewardConfig || {};
+        const rate = Number(reward.rate || 0) / 100;
+        // Purchase-level and daily payouts are only plausible when each dollar
+        // earns immediately. Threshold offers are handled by cumulative checkpoints.
+        if (reward.kind !== 'percentage' || !rate || Number(reward.activationThreshold || 0) > 0) return [];
+        const transactions = [...(progress.rewardTransactions || progress.eligibleTransactions || [])]
+            .sort((a, b) => String(a.date).localeCompare(String(b.date)) || Number(a.id || 0) - Number(b.id || 0));
+        const details = transactions.map(transaction => ({
+            kind: 'transaction',
+            key: `transaction:${transaction.id || `${transaction.date}:${transaction.merchant}:${transaction.amount}`}`,
+            amount: money(Number(transaction.amount || 0) * rate),
+            qualifyingSpend: money(transaction.amount),
+            transactions: [transaction]
+        }));
+        const byDay = new Map();
+        transactions.forEach(transaction => {
+            const day = String(transaction.date).slice(0, 10);
+            const rows = byDay.get(day) || [];
+            rows.push(transaction);
+            byDay.set(day, rows);
+        });
+        byDay.forEach((rows, day) => {
+            if (rows.length < 2) return;
+            const qualifyingSpend = money(rows.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0));
+            details.push({ kind: 'day', key: `day:${day}`, amount: money(qualifyingSpend * rate), qualifyingSpend, transactions: rows });
+        });
+        const available = details.filter(detail => detail.amount > 0);
+        // Do not reuse the same purchase/day evidence for repeated credits.
+        // Existing credits consume one matching evidence candidate each.
+        for (const credit of offer.credits || []) {
+            const index = available.findIndex(detail => close(detail.amount, credit.amount));
+            if (index >= 0) available.splice(index, 1);
+        }
+        return available;
+    }
+
     function isPotentialOfferCredit(event) {
         const text = `${event.description || ''} ${event.eventType || ''}`.toLowerCase();
         if (/payment|autopay|interest|fee|refund|returned purchase/.test(text)) return false;
@@ -56,6 +93,7 @@
         const expected = money(progress.expectedReward || 0);
         const monthRewards = (progress.months || []).map(month => money(month.earnedReward || 0)).filter(Boolean);
         const checkpoints = percentageCheckpoints(offer, progress);
+        const purchaseDetails = percentagePurchaseDetails(offer, progress);
 
         if (outstanding > 0 && close(amount, outstanding)) {
             score += 100;
@@ -63,6 +101,12 @@
         } else if (checkpoints.some(value => close(amount, value))) {
             score += 100;
             reasons.push('amount matches a percentage reward at a transaction checkpoint');
+        } else if (purchaseDetails.some(detail => close(amount, detail.amount))) {
+            const detail = purchaseDetails.find(item => close(amount, item.amount));
+            score += 85;
+            reasons.push(detail.kind === 'day'
+                ? 'amount matches the percentage reward for one day of qualifying purchases'
+                : 'amount matches the percentage reward for one qualifying purchase');
         } else if (expected > 0 && close(amount, expected)) {
             score += 90;
             reasons.push('amount matches the expected credit');
@@ -98,5 +142,5 @@
             : { matched: false, reason: best ? 'ambiguous offer credit' : 'no matching offer', rankings };
     }
 
-    return { isPotentialOfferCredit, percentageCheckpointDetails, percentageCheckpoints, scoreCandidate, findCreditMatch };
+    return { isPotentialOfferCredit, percentageCheckpointDetails, percentageCheckpoints, percentagePurchaseDetails, scoreCandidate, findCreditMatch };
 });

@@ -1396,16 +1396,26 @@ class OfferTracker {
                 const nextTier = sortedTiers.find(tier => Number(tier.threshold) > Number(focusPeriod?.metric ?? focusSpend));
                 const categoriesText = (offer.eligibility?.includeCategories || offer.categories || []).join(', ') || 'eligible purchases';
                 let postedBefore = 0;
+                const creditsBefore = [];
                 const postedCreditRows = [...(offer.credits || [])].sort((a, b) => Number(a.id) - Number(b.id)).map(credit => {
                     const amount = Number(credit.amount || 0);
                     const checkpoints = typeof CreditMatcher !== 'undefined' && typeof CreditMatcher.percentageCheckpointDetails === 'function'
                         ? CreditMatcher.percentageCheckpointDetails(offer, { ...progress, postedCredits: postedBefore })
                         : [];
                     const checkpoint = checkpoints.find(item => Math.abs(Number(item.amount) - amount) <= 0.02);
+                    const purchaseMatches = typeof CreditMatcher !== 'undefined' && typeof CreditMatcher.percentagePurchaseDetails === 'function'
+                        ? CreditMatcher.percentagePurchaseDetails({ ...offer, credits: creditsBefore }, progress)
+                        : [];
+                    const purchaseMatch = purchaseMatches.find(item => Math.abs(Number(item.amount) - amount) <= 0.02);
                     postedBefore += amount;
+                    creditsBefore.push(credit);
                     const matchingMonth = (progress.months || []).find(month => Math.abs(Number(month.earnedReward || 0) - amount) <= 0.02);
                     const matchDetail = checkpoint
                         ? `Matches $${checkpoint.qualifyingSpend.toFixed(2)} qualifying spend through ${checkpoint.transaction.merchant}.`
+                        : purchaseMatch?.kind === 'day'
+                            ? `Matches ${Number(offer.rewardConfig?.rate || offer.percentBack || 0)}% of $${purchaseMatch.qualifyingSpend.toFixed(2)} across ${purchaseMatch.transactions.length} purchases on ${String(purchaseMatch.transactions[0].date).slice(0, 10)}.`
+                            : purchaseMatch
+                                ? `Matches ${Number(offer.rewardConfig?.rate || offer.percentBack || 0)}% of the $${purchaseMatch.qualifyingSpend.toFixed(2)} purchase at ${purchaseMatch.transactions[0].merchant}.`
                         : matchingMonth
                             ? `Matches the expected reward for ${matchingMonth.month}.`
                             : (Math.abs(amount - Number(progress.expectedReward || 0)) <= 0.02 ? 'Matches the current expected reward.' : 'No exact purchase checkpoint found yet.');
