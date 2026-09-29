@@ -858,6 +858,30 @@ app.get('/api/account-events', async (req, res) => {
   }
 });
 
+app.post('/api/account-events/auto-match', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    if (!req.body.personId) return res.status(400).json({ error: 'personId is required' });
+    await client.query('BEGIN');
+    const result = await client.query(`
+      SELECT id, event_date AS date, amount, description, event_type AS "eventType"
+      FROM account_events
+      WHERE person_id = $1 AND assigned_offer_credit_id IS NULL
+      ORDER BY id
+      FOR UPDATE
+    `, [req.body.personId]);
+    const matches = await autoMatchOfferCredits(client, req.body.personId, result.rows);
+    await client.query('COMMIT');
+    res.json({ matched: matches.length, matches });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error auto-matching account events:', err);
+    res.status(500).json({ error: 'Failed to auto-match account events' });
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/account-events/:id/assign-offer', async (req, res) => {
   const client = await pool.connect();
   try {

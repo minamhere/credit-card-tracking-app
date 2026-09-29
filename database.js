@@ -356,6 +356,17 @@ class DatabaseManager {
         return response.json();
     }
 
+    async autoMatchAccountEvents() {
+        if (!this.currentPersonId) return { matched: 0, matches: [] };
+        const response = await fetch(`${this.baseUrl}/api/account-events/auto-match`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personId: this.currentPersonId })
+        });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to auto-match credits');
+        return response.json();
+    }
+
     async assignAccountEvent(eventId, offerId) {
         const response = await fetch(`${this.baseUrl}/api/account-events/${eventId}/assign-offer`, {
             method: 'POST',

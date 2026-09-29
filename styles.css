@@ -478,6 +478,10 @@ button:hover {
 .posted-credit-empty { padding: 0.65rem 0.7rem; color: var(--text-secondary); font-size: 0.82rem; }
 .dashboard-credit-transaction { padding: 0.35rem 0; border-bottom: 1px solid var(--border-color); }
 .dashboard-credit-transaction small { display: block; margin-top: 0.12rem; color: #6f42c1; }
+.dashboard-maxed-details summary { color: var(--text-secondary); font-style: italic; }
+.transaction-offer-matches { margin: 0.25rem 0 0 1rem; font-size: 0.8rem; }
+.transaction-offer-active { padding: 0.15rem 0; color: #287d3c; }
+.transaction-offer-maxed { padding: 0.15rem 0; color: var(--text-secondary); font-style: italic; }
 
 .modal {
     display: none;

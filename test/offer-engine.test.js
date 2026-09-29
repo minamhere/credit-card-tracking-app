@@ -77,3 +77,19 @@ test('same transaction can qualify for independent stacked offers', () => {
     assert.equal(engine.evaluateEligibility(transaction, broad).eligible, true);
     assert.equal(engine.evaluateEligibility(transaction, retail).eligible, true);
 });
+
+test('separates purchases made after a percentage cap is reached', () => {
+    const offer = {
+        startDate: '2026-09-01', endDate: '2026-09-30',
+        eligibility: { transactionTypes: ['purchase'] },
+        measurement: { kind: 'spend', period: 'monthly' },
+        rewardConfig: { kind: 'percentage', rate: 8, activationThreshold: 900, cap: 90 }
+    };
+    const rows = [
+        { id: 1, date: '2026-09-14', amount: 1125, merchant: 'Cap crossing purchase', transactionType: 'purchase' },
+        { id: 2, date: '2026-09-16', amount: 50, merchant: 'After cap', transactionType: 'purchase' }
+    ];
+    const result = engine.calculateOfferProgress(offer, rows, { asOf: '2026-09-20' });
+    assert.deepEqual(result.rewardTransactions.map(row => row.id), [1]);
+    assert.deepEqual(result.saturatedTransactions.map(row => row.id), [2]);
+});

@@ -331,8 +331,16 @@ class DataManager {
 
     async getMatchingOffersForTransaction(transaction) {
         await this.ensureInitialized();
-        const offers = await this.getOffers();
-        return offers.filter(offer => OfferEngine.evaluateEligibility(transaction, offer).eligible);
+        const [offers, transactions] = await Promise.all([this.getOffers(), this.getTransactions()]);
+        const matches = [];
+        for (const offer of offers) {
+            if (!OfferEngine.evaluateEligibility(transaction, offer).eligible) continue;
+            const progress = OfferEngine.calculateOfferProgress(offer, transactions);
+            const contributes = progress.rewardTransactions.some(item => Number(item.id) === Number(transaction.id));
+            const saturated = progress.saturatedTransactions.some(item => Number(item.id) === Number(transaction.id));
+            if (contributes || saturated) matches.push({ ...offer, rewardStatus: contributes ? 'contributes' : 'maxed' });
+        }
+        return matches;
     }
 
     // Get all offers with progress and transactions, sorted by priority
@@ -351,7 +359,7 @@ class DataManager {
                 const endDate = new Date(offer.endDate + 'T23:59:59');
 
                 // Get transactions that apply to this offer
-                const offerTransactions = progress.eligibleTransactions;
+                const offerTransactions = progress.rewardTransactions;
 
                 // Determine completion status
                 let isComplete = false;
@@ -403,6 +411,7 @@ class DataManager {
                     ...offer,
                     progress,
                     transactions: offerTransactions,
+                    saturatedTransactions: progress.saturatedTransactions,
                     isComplete,
                     currentMonthComplete,
                     hasActionableMonths,

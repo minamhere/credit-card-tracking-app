@@ -1215,6 +1215,9 @@ class OfferTracker {
         const container = document.getElementById('offer-progress');
 
         try {
+            // Retry unassigned credits here as well as during CSV import. This
+            // handles credits imported before their corresponding offer.
+            await this.dataManager.dbManager.autoMatchAccountEvents();
             // Get simplified offer list with progress and transactions
             const allOffers = await this.dataManager.getSimplifiedOfferList();
 
@@ -1321,6 +1324,13 @@ class OfferTracker {
                         </div>
                     </details>
                 ` : '<div class="dashboard-empty-note">No qualifying transactions yet</div>';
+                const saturatedTransactionsHtml = (offer.saturatedTransactions || []).length ? `
+                    <details class="dashboard-details dashboard-maxed-details">
+                        <summary>Would qualify, but reward was already maxed (${offer.saturatedTransactions.length})</summary>
+                        <div class="dashboard-transaction-list">
+                            ${offer.saturatedTransactions.map(t => `<div class="dashboard-credit-transaction">${formatDate(t.date)} • ${this.escapeHtml(t.merchant)} • <strong>$${Number(t.amount).toFixed(2)}</strong></div>`).join('')}
+                        </div>
+                    </details>` : '';
 
                 const reconciliation = progress.reconciliation;
                 const reviewRows = reconciliation && reconciliation.status === 'mismatch'
@@ -1421,6 +1431,7 @@ class OfferTracker {
                             ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
                         </details>
                         ${transactionsHtml}
+                        ${saturatedTransactionsHtml}
                         <div class="dashboard-card-actions">
                             <button class="btn-secondary" onclick="tracker.recordOfferCredit(${offer.id})">Record statement credit</button>
                             ${offer.bonusReward && !offer.bonusPosted ? `<button class="btn-primary" onclick="tracker.markBonusPosted(${offer.id})">Mark Bonus Posted</button>` : ''}
@@ -1706,7 +1717,9 @@ class OfferTracker {
         const transactionHtml = await Promise.all(paginatedTransactions.map(async transaction => {
             const matchingOffers = await this.dataManager.getMatchingOffersForTransaction(transaction);
             const matchingOffersHtml = matchingOffers.length > 0
-                ? `<div style="margin-top: 0.25rem;">${matchingOffers.map(o => `<div style="font-size: 0.8rem; color: #28a745; margin-left: 1rem; padding: 0.15rem 0;">↳ ${o.name}</div>`).join('')}</div>`
+                ? `<div class="transaction-offer-matches">${matchingOffers.map(o => o.rewardStatus === 'maxed'
+                    ? `<div class="transaction-offer-maxed">↳ ${this.escapeHtml(o.name)} — category qualifies, but the maximum was already reached</div>`
+                    : `<div class="transaction-offer-active">↳ ${this.escapeHtml(o.name)} — contributes to reward</div>`).join('')}</div>`
                 : '';
 
             // Format date without timezone conversion - just parse YYYY-MM-DD and display

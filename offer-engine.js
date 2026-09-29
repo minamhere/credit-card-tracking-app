@@ -140,6 +140,31 @@
         return { spending, transactionCount: count, metric, ...calculateReward(metric, offer.rewardConfig) };
     }
 
+    function partitionRewardTransactions(transactions, offer) {
+        const contributing = [];
+        const saturated = [];
+        const metrics = new Map();
+        const sorted = [...transactions].sort((a, b) => dateOnly(a.date).localeCompare(dateOnly(b.date)) || Number(a.id || 0) - Number(b.id || 0));
+        const reward = offer.rewardConfig;
+        let terminalMetric = Infinity;
+        if (reward.kind === 'percentage' && reward.cap != null && Number(reward.rate) > 0) {
+            terminalMetric = Math.max(Number(reward.activationThreshold || 0), Number(reward.cap) / (Number(reward.rate) / 100));
+        } else if (reward.kind === 'tiers') {
+            terminalMetric = Math.max(0, ...(reward.tiers || []).map(tier => Number(tier.threshold)));
+        } else if (reward.kind === 'fixed') {
+            terminalMetric = Number(reward.threshold || 0);
+        }
+
+        for (const transaction of sorted) {
+            const period = offer.measurement.period === 'monthly' ? dateOnly(transaction.date).slice(0, 7) : 'offer';
+            const before = Number(metrics.get(period) || 0);
+            if (before >= terminalMetric) saturated.push(transaction);
+            else contributing.push(transaction);
+            metrics.set(period, before + (offer.measurement.kind === 'count' ? 1 : Number(transaction.amount || 0)));
+        }
+        return { rewardTransactions: contributing, saturatedTransactions: saturated };
+    }
+
     function endOfMonthAfter(dateText, count) {
         const [year, month] = dateOnly(dateText).split('-').map(Number);
         return new Date(Date.UTC(year, month - 1 + count + 1, 0)).toISOString().slice(0, 10);
@@ -189,6 +214,7 @@
         const evaluated = transactions.map(transaction => ({ transaction, result: evaluateEligibility(transaction, offer) }));
         const eligibleTransactions = evaluated.filter(item => item.result.eligible).map(item => item.transaction);
         const excludedTransactions = evaluated.filter(item => !item.result.eligible).map(item => ({ ...item.transaction, exclusionReasons: item.result.reasons }));
+        const transactionContribution = partitionRewardTransactions(eligibleTransactions, offer);
         const postedCredits = roundMoney((offer.credits || []).reduce((sum, credit) => sum + Number(credit.amount || 0), 0));
 
         if (offer.measurement.period === 'monthly') {
@@ -226,6 +252,7 @@
                 postedCredits,
                 outstandingReward: roundMoney(Math.max(expectedReward - postedCredits, 0)),
                 reconciliation: reconcileCredits(offer, expectedReward, postedCredits, matureExpected, eligibleTransactions, excludedTransactions),
+                ...transactionContribution,
                 eligibleTransactions,
                 excludedTransactions
             };
@@ -242,6 +269,7 @@
             postedCredits,
             outstandingReward: roundMoney(Math.max(period.earnedReward - postedCredits, 0)),
             reconciliation: reconcileCredits(offer, period.earnedReward, postedCredits, matureExpected, eligibleTransactions, excludedTransactions),
+            ...transactionContribution,
             eligibleTransactions,
             excludedTransactions
         };
