@@ -602,7 +602,8 @@ class OfferTracker {
                 statusElement.className = 'import-message success';
             }
             const actionable = messages.filter(message => ['review', 'linked'].includes(message.processingStatus));
-            container.innerHTML = actionable.length ? actionable.map(message => `
+            const handled = messages.filter(message => ['ignored', 'imported'].includes(message.processingStatus)).slice(0, 20);
+            const actionableHtml = actionable.length ? actionable.map(message => `
                 <div class="m365-message m365-message-${message.processingStatus}">
                     <div class="m365-message-main">
                         <strong>${this.escapeHtml(message.subject || '(No subject)')}</strong>
@@ -615,6 +616,19 @@ class OfferTracker {
                         <button class="btn-secondary" onclick="tracker.ignoreM365Message(${message.id})">Ignore</button>
                     </div>
                 </div>`).join('') : '<p class="dashboard-empty-note">No Microsoft 365 messages need review.</p>';
+            const handledHtml = handled.length ? `
+                <details class="m365-handled">
+                    <summary>Recently handled (${handled.length})</summary>
+                    ${handled.map(message => `
+                        <div class="m365-message">
+                            <div class="m365-message-main">
+                                <strong>${this.escapeHtml(message.subject || '(No subject)')}</strong>
+                                <small>${this.escapeHtml(message.personName || 'Unassigned')} · ${message.receivedAt ? new Date(message.receivedAt).toLocaleString() : 'Unknown date'}</small>
+                                <span>${this.escapeHtml(message.processingStatus)} — ${this.escapeHtml(message.reason || message.classification)}</span>
+                            </div>
+                        </div>`).join('')}
+                </details>` : '';
+            container.innerHTML = actionableHtml + handledHtml;
             this.m365Messages = messages;
         } catch (error) {
             statusElement.textContent = error.message;

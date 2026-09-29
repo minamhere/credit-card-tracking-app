@@ -1269,6 +1269,8 @@ button:hover {
 .m365-message-main { display: grid; gap: 0.25rem; }
 .m365-message-main small { color: var(--text-secondary); }
 .m365-linked { color: var(--success-color, #16803c); font-weight: 600; }
+.m365-handled { margin-top: 0.75rem; }
+.m365-handled summary { cursor: pointer; font-weight: 600; color: var(--text-secondary); }
 
 @media (max-width: 768px) {
     .section-heading, .import-summary { flex-direction: column; align-items: flex-start; }
