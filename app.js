@@ -1216,16 +1216,29 @@ class OfferTracker {
         let autoMatchWarning = '';
 
         try {
-            // Retry unassigned credits here as well as during CSV import. This
+            // Load the dashboard first, then retry credits through the same
+            // per-event assignment API used by the manual workflow. This also
             // handles credits imported before their corresponding offer.
+            let allOffers = await this.dataManager.getSimplifiedOfferList();
             try {
-                await this.dataManager.dbManager.autoMatchAccountEvents();
+                const events = await this.dataManager.dbManager.getAccountEvents();
+                let matched = 0;
+                for (const event of events.filter(item => !item.assignedOfferCreditId)) {
+                    const match = CreditMatcher.findCreditMatch(event, allOffers.map(offer => ({ offer, progress: offer.progress })));
+                    if (!match.matched) continue;
+                    await this.dataManager.dbManager.assignAccountEvent(event.id, match.offerId);
+                    matched++;
+                    const matchedOffer = allOffers.find(offer => Number(offer.id) === Number(match.offerId));
+                    if (matchedOffer) {
+                        matchedOffer.credits = [...(matchedOffer.credits || []), { amount: Math.abs(Number(event.amount)), postedDate: event.date, description: event.description }];
+                        matchedOffer.progress.postedCredits = Number(matchedOffer.progress.postedCredits || 0) + Math.abs(Number(event.amount));
+                    }
+                }
+                if (matched) allOffers = await this.dataManager.getSimplifiedOfferList();
             } catch (error) {
                 console.warn('Credit auto-match skipped:', error);
-                autoMatchWarning = 'Automatic credit matching could not run. The dashboard data below is still available.';
+                autoMatchWarning = `Automatic credit matching could not run: ${error.message || 'unknown error'}. The dashboard data below is still available.`;
             }
-            // Get simplified offer list with progress and transactions
-            const allOffers = await this.dataManager.getSimplifiedOfferList();
 
             // Separate visible and hidden offers
             const offers = allOffers.filter(o => !o.hidden);
