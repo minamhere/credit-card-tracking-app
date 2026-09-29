@@ -118,6 +118,38 @@ BEGIN
     END IF;
 END $$;
 
+CREATE TABLE IF NOT EXISTS m365_sync_state (
+    folder_path TEXT PRIMARY KEY,
+    folder_id TEXT,
+    delta_link TEXT,
+    last_success_at TIMESTAMP,
+    last_error TEXT,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS email_ingestions (
+    id SERIAL PRIMARY KEY,
+    graph_message_id TEXT NOT NULL UNIQUE,
+    internet_message_id TEXT,
+    mailbox TEXT NOT NULL,
+    folder_path TEXT NOT NULL,
+    person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+    received_at TIMESTAMP,
+    sender TEXT,
+    subject TEXT,
+    body_text TEXT,
+    body_hash TEXT,
+    classification TEXT NOT NULL,
+    processing_status TEXT NOT NULL DEFAULT 'review',
+    parsed_offer JSONB,
+    offer_fingerprint TEXT,
+    linked_offer_id INTEGER REFERENCES offers(id) ON DELETE SET NULL,
+    classification_reason TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS email_ingestions_status_idx ON email_ingestions (processing_status, received_at DESC);
+
 -- One-time clean slate requested for the redesigned importer. Keep the people
 -- records so the existing cardholder selection remains usable, but remove all
 -- offer, transaction, import, credit, and merchant-classification data. The

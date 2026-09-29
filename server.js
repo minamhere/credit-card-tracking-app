@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const OfferEngine = require('./offer-engine');
 const OfferEmailParser = require('./offer-email-parser');
 const CreditMatcher = require('./credit-matcher');
+const M365 = require('./m365');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -923,6 +924,81 @@ app.post('/api/account-events/:id/assign-offer', async (req, res) => {
 });
 
 // Utility endpoints
+app.get('/api/m365/status', async (req, res) => {
+  const config = M365.configFromEnv();
+  const states = await pool.query('SELECT * FROM m365_sync_state ORDER BY folder_path');
+  res.json({
+    configured: Boolean(config.tenantId && config.clientId && config.thumbprint && config.mailbox),
+    certificatePresent: fs.existsSync(config.privateKeyPath),
+    mailbox: config.mailbox,
+    folders: config.folders,
+    syncState: states.rows
+  });
+});
+
+app.post('/api/m365/test', async (req, res) => {
+  try {
+    const config = M365.configFromEnv();
+    const token = await M365.acquireToken(config);
+    const folders = [];
+    for (const folderPath of config.folders) folders.push({ folderPath, folderId: await M365.findFolder(config, token, folderPath) });
+    res.json({ success: true, mailbox: config.mailbox, folders });
+  } catch (err) {
+    console.error('M365 connection test failed:', err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/m365/sync', async (req, res) => {
+  try {
+    res.json({ success: true, results: await M365.syncAll(pool) });
+  } catch (err) {
+    console.error('M365 synchronization failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/m365/messages', async (req, res) => {
+  try {
+    const params = [];
+    let where = '';
+    if (req.query.personId) { params.push(req.query.personId); where = 'WHERE e.person_id = $1 OR e.person_id IS NULL'; }
+    const result = await pool.query(`
+      SELECT e.*, p.name AS person_name, o.name AS linked_offer_name
+      FROM email_ingestions e
+      LEFT JOIN people p ON p.id = e.person_id
+      LEFT JOIN offers o ON o.id = e.linked_offer_id
+      ${where}
+      ORDER BY e.received_at DESC NULLS LAST, e.id DESC
+      LIMIT 200
+    `, params);
+    res.json(result.rows.map(row => ({
+      id: row.id, graphMessageId: row.graph_message_id, receivedAt: row.received_at, sender: row.sender,
+      subject: row.subject, folderPath: row.folder_path, personId: row.person_id, personName: row.person_name,
+      classification: row.classification, processingStatus: row.processing_status, parsedOffer: row.parsed_offer,
+      fingerprint: row.offer_fingerprint, linkedOfferId: row.linked_offer_id, linkedOfferName: row.linked_offer_name,
+      reason: row.classification_reason
+    })));
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load ingested email' });
+  }
+});
+
+app.patch('/api/m365/messages/:id', async (req, res) => {
+  try {
+    const allowed = ['ignored', 'review', 'linked', 'imported'];
+    if (!allowed.includes(req.body.processingStatus)) return res.status(400).json({ error: 'Invalid processing status' });
+    const result = await pool.query(
+      'UPDATE email_ingestions SET processing_status=$1, linked_offer_id=COALESCE($2, linked_offer_id), updated_at=CURRENT_TIMESTAMP WHERE id=$3 RETURNING id',
+      [req.body.processingStatus, req.body.linkedOfferId || null, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Email not found' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update email' });
+  }
+});
+
 app.get('/api/merchants', async (req, res) => {
   try {
     const result = await pool.query('SELECT DISTINCT merchant FROM transactions ORDER BY merchant');
@@ -968,4 +1044,10 @@ app.listen(port, async () => {
   console.log(`Server running on port ${port}`);
   console.log(`Visit http://localhost:${port} to view the app`);
   await runMigrations();
+  const m365Config = M365.configFromEnv();
+  const m365Configured = m365Config.tenantId && m365Config.clientId && m365Config.thumbprint;
+  if (m365Configured && process.env.M365_AUTO_SYNC !== 'false') {
+    setTimeout(() => M365.syncAll(pool).catch(error => console.error('Scheduled M365 sync failed:', error)), 60000);
+    setInterval(() => M365.syncAll(pool).catch(error => console.error('Scheduled M365 sync failed:', error)), 24 * 60 * 60 * 1000);
+  }
 });

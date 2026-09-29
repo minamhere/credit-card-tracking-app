@@ -9,6 +9,7 @@ A web application to track credit card spending offers and bonus qualifications 
 - **Merchant category rules** that automatically classify future purchases into one or more bonus categories
 - **Shared Citi merchant mappings** for known grocery, gas, restaurant, retail, entertainment, and transportation merchants
 - **Automatic bonus progress** using the same multi-category matching as manually entered transactions
+- **Microsoft 365 offer inbox** using certificate-based, application-only Graph authentication
 
 - **Multi-User Support**: Track offers and transactions for multiple cardholders
 - **Dashboard**: Visual progress tracking for all active offers
@@ -98,6 +99,18 @@ Your data will be persisted in the `postgres-data` folder on your Synology.
 2. Click "Add New Offer" to create additional offers
 3. Fill in the offer criteria and rewards
 4. Use the Edit/Delete buttons to manage existing offers
+
+### Microsoft 365 Offer Inbox
+
+The Docker deployment can read Citi messages from the configured shared mailbox and its per-cardholder folders. Authentication is application-only with a certificate; no mailbox password or client secret is stored by the app.
+
+1. Put the PEM-encoded private key on the NAS at `/volume1/docker/credit-card-tracker/secrets/m365-private-key.pem`.
+2. Keep the key readable only by the account/container that needs it.
+3. Set any overrides in `.env` using the variables documented in `.env.example`.
+4. Rebuild the app container with `docker compose up -d --build`.
+5. Open **Offers**, click **Test connection**, then **Sync now**.
+
+Offer reminders are linked to an existing offer when their normalized terms match. New or uncertain offers remain in a review queue. APR, balance-transfer, and Flex Loan promotions are ignored. The app syncs once shortly after startup and then daily; set `M365_AUTO_SYNC=false` to use manual synchronization only.
 
 ### Viewing Progress
 1. The "Dashboard" tab shows your real-time progress

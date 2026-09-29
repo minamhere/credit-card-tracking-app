@@ -1249,12 +1249,34 @@ button:hover {
 .account-event small { display: block; color: var(--text-secondary); }
 .account-event select { padding: 0.45rem; background: var(--input-bg); color: var(--text-primary); border: 1px solid var(--input-border); }
 
+.m365-panel {
+    margin: 1rem 0 1.5rem;
+    padding: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--card-bg);
+}
+.m365-panel .section-heading { margin-bottom: 0.5rem; }
+.m365-actions, .m365-message-actions { display: flex; gap: 0.5rem; align-items: center; }
+.m365-message {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.m365-message:last-child { border-bottom: 0; }
+.m365-message-main { display: grid; gap: 0.25rem; }
+.m365-message-main small { color: var(--text-secondary); }
+.m365-linked { color: var(--success-color, #16803c); font-weight: 600; }
+
 @media (max-width: 768px) {
     .section-heading, .import-summary { flex-direction: column; align-items: flex-start; }
     .merchant-rule { grid-template-columns: 1fr auto; }
     .merchant-rule span { grid-column: 1 / -1; grid-row: 2; }
     .account-event { grid-template-columns: 1fr auto; }
     .account-event span, .account-event select { grid-column: 1 / -1; }
+    .m365-message { flex-direction: column; }
     .dashboard-heading { flex-direction: column; }
     .dashboard-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .dashboard-metrics { grid-template-columns: 1fr; }

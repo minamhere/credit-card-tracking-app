@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Citi Shop Your Way - Offer Tracker</title>
-    <link rel="stylesheet" href="styles.css?v=20260928-4">
+    <link rel="stylesheet" href="styles.css?v=20260928-5">
 </head>
 <body>
     <div class="container">
@@ -171,6 +171,17 @@
             <!-- Offers Tab -->
             <div id="offers" class="tab-content">
                 <h2>Manage Offers</h2>
+                <section class="m365-panel">
+                    <div class="section-heading">
+                        <div><h3>Microsoft 365 offer inbox</h3><p>Read-only daily synchronization from citi-offers@yither.com.</p></div>
+                        <div class="m365-actions">
+                            <button type="button" id="test-m365" class="btn-secondary">Test connection</button>
+                            <button type="button" id="sync-m365" class="btn-primary">Sync now</button>
+                        </div>
+                    </div>
+                    <div id="m365-status" class="import-message" aria-live="polite"></div>
+                    <div id="m365-message-list"></div>
+                </section>
                 <section class="offer-import-panel">
                     <h3>Import an offer email</h3>
                     <p>Paste the Citi email text. The extracted terms will open in the offer editor for review before saving.</p>
@@ -309,12 +320,12 @@
         </main>
     </div>
 
-    <script src="citi-csv.js?v=20260928-4"></script>
-    <script src="offer-email-parser.js?v=20260928-4"></script>
-    <script src="offer-engine.js?v=20260928-4"></script>
-    <script src="credit-matcher.js?v=20260928-4"></script>
-    <script src="database.js?v=20260928-4"></script>
-    <script src="data-manager.js?v=20260928-4"></script>
-    <script src="app.js?v=20260928-4"></script>
+    <script src="citi-csv.js?v=20260928-5"></script>
+    <script src="offer-email-parser.js?v=20260928-5"></script>
+    <script src="offer-engine.js?v=20260928-5"></script>
+    <script src="credit-matcher.js?v=20260928-5"></script>
+    <script src="database.js?v=20260928-5"></script>
+    <script src="data-manager.js?v=20260928-5"></script>
+    <script src="app.js?v=20260928-5"></script>
 </body>
 </html>

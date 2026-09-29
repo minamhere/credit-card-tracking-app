@@ -377,6 +377,43 @@ class DatabaseManager {
         return response.json();
     }
 
+    async getM365Status() {
+        const response = await fetch(`${this.baseUrl}/api/m365/status`);
+        if (!response.ok) throw new Error('Failed to load Microsoft 365 status');
+        return response.json();
+    }
+
+    async testM365Connection() {
+        const response = await fetch(`${this.baseUrl}/api/m365/test`, { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Microsoft 365 connection test failed');
+        return result;
+    }
+
+    async syncM365() {
+        const response = await fetch(`${this.baseUrl}/api/m365/sync`, { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Microsoft 365 synchronization failed');
+        return result;
+    }
+
+    async getM365Messages() {
+        const suffix = this.currentPersonId ? `?personId=${encodeURIComponent(this.currentPersonId)}` : '';
+        const response = await fetch(`${this.baseUrl}/api/m365/messages${suffix}`);
+        if (!response.ok) throw new Error('Failed to load Microsoft 365 messages');
+        return response.json();
+    }
+
+    async updateM365Message(id, processingStatus, linkedOfferId = null) {
+        const response = await fetch(`${this.baseUrl}/api/m365/messages/${id}`, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ processingStatus, linkedOfferId })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Failed to update Microsoft 365 message');
+        return result;
+    }
+
     // Get unique merchants for autocomplete
     async getUniqueMerchants() {
         try {

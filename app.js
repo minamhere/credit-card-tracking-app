@@ -11,6 +11,7 @@ class OfferTracker {
         this.importMetadata = null;
         this.pendingOfferImport = null;
         this.pendingOfferDuplicate = null;
+        this.pendingEmailIngestion = null;
         this.init();
     }
 
@@ -137,6 +138,7 @@ class OfferTracker {
             await this.renderAccountEvents();
             console.log('Rendering offers...');
             await this.renderOffers();
+            await this.renderM365Inbox();
             console.log('All rendering complete');
 
             // Set default transaction date to today in local timezone
@@ -190,6 +192,7 @@ class OfferTracker {
         await this.renderDashboard();
         await this.renderTransactions();
         await this.renderOffers();
+        await this.renderM365Inbox();
         this.clearImportPreview();
         await this.renderMerchantRules();
         await this.renderAccountEvents();
@@ -347,6 +350,8 @@ class OfferTracker {
         });
 
         document.getElementById('parse-offer-email').addEventListener('click', () => this.parseOfferEmail());
+        document.getElementById('test-m365').addEventListener('click', () => this.testM365Connection());
+        document.getElementById('sync-m365').addEventListener('click', () => this.syncM365());
         document.getElementById('clear-offer-email').addEventListener('click', () => {
             document.getElementById('offer-email-text').value = '';
             document.getElementById('offer-import-message').textContent = '';
@@ -577,6 +582,108 @@ class OfferTracker {
         } catch (error) {
             container.innerHTML = '<p>Account events could not be loaded.</p>';
         }
+    }
+
+    async renderM365Inbox() {
+        const statusElement = document.getElementById('m365-status');
+        const container = document.getElementById('m365-message-list');
+        if (!statusElement || !container) return;
+        try {
+            const [status, messages] = await Promise.all([
+                this.dataManager.dbManager.getM365Status(),
+                this.dataManager.dbManager.getM365Messages()
+            ]);
+            if (!status.configured || !status.certificatePresent) {
+                statusElement.textContent = `Not ready: ${!status.configured ? 'configuration is incomplete' : 'private certificate is not mounted'}.`;
+                statusElement.className = 'import-message warning';
+            } else {
+                const latest = status.syncState.map(item => item.last_success_at).filter(Boolean).sort().pop();
+                statusElement.textContent = `Configured for ${status.mailbox}.${latest ? ` Last successful sync: ${new Date(latest).toLocaleString()}.` : ' Not synchronized yet.'}`;
+                statusElement.className = 'import-message success';
+            }
+            const actionable = messages.filter(message => ['review', 'linked'].includes(message.processingStatus));
+            container.innerHTML = actionable.length ? actionable.map(message => `
+                <div class="m365-message m365-message-${message.processingStatus}">
+                    <div class="m365-message-main">
+                        <strong>${this.escapeHtml(message.subject || '(No subject)')}</strong>
+                        <small>${this.escapeHtml(message.personName || 'Unassigned')} · ${message.receivedAt ? new Date(message.receivedAt).toLocaleString() : 'Unknown date'} · ${this.escapeHtml(message.folderPath)}</small>
+                        <span>${this.escapeHtml(message.reason || message.classification)}</span>
+                        ${message.linkedOfferName ? `<span class="m365-linked">Linked to ${this.escapeHtml(message.linkedOfferName)}</span>` : ''}
+                    </div>
+                    <div class="m365-message-actions">
+                        ${message.parsedOffer && message.processingStatus === 'review' ? `<button class="btn-primary" onclick="tracker.reviewM365Offer(${message.id})">Review offer</button>` : ''}
+                        <button class="btn-secondary" onclick="tracker.ignoreM365Message(${message.id})">Ignore</button>
+                    </div>
+                </div>`).join('') : '<p class="dashboard-empty-note">No Microsoft 365 messages need review.</p>';
+            this.m365Messages = messages;
+        } catch (error) {
+            statusElement.textContent = error.message;
+            statusElement.className = 'import-message error';
+            container.innerHTML = '';
+        }
+    }
+
+    async testM365Connection() {
+        const status = document.getElementById('m365-status');
+        status.textContent = 'Testing certificate authentication and mailbox folders…';
+        status.className = 'import-message';
+        try {
+            const result = await this.dataManager.dbManager.testM365Connection();
+            status.textContent = `Connected to ${result.mailbox}. Found: ${result.folders.map(folder => folder.folderPath).join(', ')}.`;
+            status.className = 'import-message success';
+        } catch (error) {
+            status.textContent = error.message;
+            status.className = 'import-message error';
+        }
+    }
+
+    async syncM365() {
+        const status = document.getElementById('m365-status');
+        const button = document.getElementById('sync-m365');
+        button.disabled = true;
+        status.textContent = 'Synchronizing Microsoft 365…';
+        try {
+            const result = await this.dataManager.dbManager.syncM365();
+            const count = result.results.reduce((sum, folder) => sum + Number(folder.processed || 0), 0);
+            status.textContent = `Synchronization complete. Processed ${count} message records.`;
+            status.className = 'import-message success';
+            await this.renderM365Inbox();
+        } catch (error) {
+            status.textContent = error.message;
+            status.className = 'import-message error';
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    async reviewM365Offer(id) {
+        const message = (this.m365Messages || []).find(item => Number(item.id) === Number(id));
+        if (!message?.parsedOffer) return;
+        const parsed = { ...message.parsedOffer };
+        parsed.sourceMetadata = { ...(parsed.sourceMetadata || {}), graphMessageId: message.graphMessageId, emailIngestionId: message.id, folderPath: message.folderPath };
+        parsed.sourceExternalId = message.graphMessageId;
+        this.pendingEmailIngestion = message;
+        this.pendingOfferImport = parsed;
+        const duplicateResult = await this.dataManager.dbManager.checkOfferDuplicate(parsed.fingerprint);
+        this.pendingOfferDuplicate = duplicateResult.duplicate ? duplicateResult.offer : null;
+        parsed.categories.forEach(category => this.addCategory(category));
+        (parsed.excludeCategories || []).forEach(category => this.addCategory(category));
+        this.showOfferForm(parsed);
+        const duplicateWarning = document.getElementById('offer-duplicate-warning');
+        document.getElementById('force-offer-duplicate').checked = false;
+        if (duplicateResult.duplicate) {
+            const existing = duplicateResult.offer;
+            document.getElementById('offer-duplicate-details').textContent = ` Existing: ${existing.name} (${existing.startDate}–${existing.endDate}).`;
+            duplicateWarning.classList.remove('hidden');
+        } else {
+            duplicateWarning.classList.add('hidden');
+        }
+        document.getElementById('offer-form-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async ignoreM365Message(id) {
+        await this.dataManager.dbManager.updateM365Message(id, 'ignored');
+        await this.renderM365Inbox();
     }
 
     async assignAccountEvent(eventId) {
@@ -1068,6 +1175,7 @@ class OfferTracker {
         document.getElementById('offer-form').reset();
         this.currentEditingOffer = null;
         this.pendingOfferImport = null;
+        this.pendingEmailIngestion = null;
         this.pendingOfferDuplicate = null;
         document.getElementById('offer-duplicate-warning').classList.add('hidden');
     }
@@ -1184,16 +1292,23 @@ class OfferTracker {
             minimumAmount: offerData.minTransaction,
             maximumAmount: previousEligibility?.maximumAmount || null
         };
-        offerData.sourceType = this.pendingOfferImport ? 'pasted_email' : (this.currentEditingOffer?.sourceType || 'manual');
+        offerData.sourceType = this.pendingEmailIngestion ? 'm365_email' : (this.pendingOfferImport ? 'pasted_email' : (this.currentEditingOffer?.sourceType || 'manual'));
+        offerData.sourceExternalId = this.pendingEmailIngestion ? this.pendingEmailIngestion.graphMessageId : (this.currentEditingOffer?.sourceExternalId || null);
         offerData.sourceMetadata = this.pendingOfferImport ? this.pendingOfferImport.sourceMetadata : (this.currentEditingOffer?.sourceMetadata || {});
         offerData.reviewStatus = 'confirmed';
         offerData.offerFingerprint = this.pendingOfferImport ? this.pendingOfferImport.fingerprint : (this.currentEditingOffer?.offerFingerprint || null);
         offerData.forceAllowDuplicate = forceAllowDuplicate;
 
+        const emailIngestion = this.pendingEmailIngestion;
+        let savedOffer;
         if (this.currentEditingOffer) {
             await this.dataManager.updateOffer(this.currentEditingOffer.id, offerData);
+            savedOffer = { id: this.currentEditingOffer.id };
         } else {
-            await this.dataManager.addOffer(offerData);
+            savedOffer = await this.dataManager.addOffer(offerData);
+        }
+        if (emailIngestion && savedOffer?.id) {
+            await this.dataManager.dbManager.updateM365Message(emailIngestion.id, 'imported', savedOffer.id);
         }
 
         this.hideOfferForm();

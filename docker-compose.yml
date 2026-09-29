@@ -34,6 +34,15 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://credit_card_user:${POSTGRES_PASSWORD:-changeme123}@db:5432/credit_card_tracker
+      M365_TENANT_ID: ${M365_TENANT_ID:-03ca0a0f-0860-4fb7-ac51-ee8a12ec9503}
+      M365_CLIENT_ID: ${M365_CLIENT_ID:-ac203045-b19d-43a8-82dc-7344b40df733}
+      M365_CERT_THUMBPRINT: ${M365_CERT_THUMBPRINT:-346CE70F41D558B6D0310043735CF695E8EFF5D1}
+      M365_CERT_PATH: /run/secrets/m365-private-key.pem
+      M365_MAILBOX: ${M365_MAILBOX:-citi-offers@yither.com}
+      M365_FOLDER_PATHS: ${M365_FOLDER_PATHS:-Inbox/Citi Offers/Chris,Inbox/Citi Offers/Janet}
+      M365_AUTO_SYNC: ${M365_AUTO_SYNC:-true}
+    volumes:
+      - ${M365_CERT_HOST_PATH:-/volume1/docker/credit-card-tracker/secrets/m365-private-key.pem}:/run/secrets/m365-private-key.pem:ro
     depends_on:
       db:
         condition: service_healthy
