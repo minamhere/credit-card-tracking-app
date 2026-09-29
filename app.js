@@ -1213,11 +1213,17 @@ class OfferTracker {
 
     async renderDashboard() {
         const container = document.getElementById('offer-progress');
+        let autoMatchWarning = '';
 
         try {
             // Retry unassigned credits here as well as during CSV import. This
             // handles credits imported before their corresponding offer.
-            await this.dataManager.dbManager.autoMatchAccountEvents();
+            try {
+                await this.dataManager.dbManager.autoMatchAccountEvents();
+            } catch (error) {
+                console.warn('Credit auto-match skipped:', error);
+                autoMatchWarning = 'Automatic credit matching could not run. The dashboard data below is still available.';
+            }
             // Get simplified offer list with progress and transactions
             const allOffers = await this.dataManager.getSimplifiedOfferList();
 
@@ -1366,7 +1372,9 @@ class OfferTracker {
                 let postedBefore = 0;
                 const postedCreditRows = [...(offer.credits || [])].sort((a, b) => Number(a.id) - Number(b.id)).map(credit => {
                     const amount = Number(credit.amount || 0);
-                    const checkpoints = CreditMatcher.percentageCheckpointDetails(offer, { ...progress, postedCredits: postedBefore });
+                    const checkpoints = typeof CreditMatcher !== 'undefined' && typeof CreditMatcher.percentageCheckpointDetails === 'function'
+                        ? CreditMatcher.percentageCheckpointDetails(offer, { ...progress, postedCredits: postedBefore })
+                        : [];
                     const checkpoint = checkpoints.find(item => Math.abs(Number(item.amount) - amount) <= 0.02);
                     postedBefore += amount;
                     const matchingMonth = (progress.months || []).find(month => Math.abs(Number(month.earnedReward || 0) - amount) <= 0.02);
@@ -1443,6 +1451,7 @@ class OfferTracker {
             });
 
             const summary = `
+                ${autoMatchWarning ? `<div class="dashboard-warning">${this.escapeHtml(autoMatchWarning)}</div>` : ''}
                 <div class="dashboard-heading">
                     <div><h2>Reward dashboard</h2><p>What to do next and whether Citi paid what you expected.</p></div>
                     ${reviewNeeded ? `<div class="dashboard-review-callout">⚠ ${reviewNeeded} offer${reviewNeeded === 1 ? '' : 's'} need review</div>` : ''}

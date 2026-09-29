@@ -336,8 +336,8 @@ class DataManager {
         for (const offer of offers) {
             if (!OfferEngine.evaluateEligibility(transaction, offer).eligible) continue;
             const progress = OfferEngine.calculateOfferProgress(offer, transactions);
-            const contributes = progress.rewardTransactions.some(item => Number(item.id) === Number(transaction.id));
-            const saturated = progress.saturatedTransactions.some(item => Number(item.id) === Number(transaction.id));
+            const contributes = (progress.rewardTransactions || progress.eligibleTransactions || []).some(item => Number(item.id) === Number(transaction.id));
+            const saturated = (progress.saturatedTransactions || []).some(item => Number(item.id) === Number(transaction.id));
             if (contributes || saturated) matches.push({ ...offer, rewardStatus: contributes ? 'contributes' : 'maxed' });
         }
         return matches;
@@ -359,7 +359,7 @@ class DataManager {
                 const endDate = new Date(offer.endDate + 'T23:59:59');
 
                 // Get transactions that apply to this offer
-                const offerTransactions = progress.rewardTransactions;
+                const offerTransactions = progress.rewardTransactions || progress.eligibleTransactions || [];
 
                 // Determine completion status
                 let isComplete = false;
@@ -411,7 +411,7 @@ class DataManager {
                     ...offer,
                     progress,
                     transactions: offerTransactions,
-                    saturatedTransactions: progress.saturatedTransactions,
+                    saturatedTransactions: progress.saturatedTransactions || [],
                     isComplete,
                     currentMonthComplete,
                     hasActionableMonths,

@@ -441,6 +441,7 @@ button:hover {
 .dashboard-heading h2 { margin: 0 0 0.25rem; }
 .dashboard-heading p { margin: 0; color: var(--text-secondary); }
 .dashboard-review-callout { padding: 0.55rem 0.75rem; border-radius: 6px; background: #f8d7da; color: #721c24; font-weight: 700; }
+.dashboard-warning { margin-bottom: 0.75rem; padding: 0.65rem 0.75rem; border: 1px solid #e3ca78; border-radius: 6px; background: #fff3cd; color: #856404; }
 .dashboard-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .dashboard-summary .summary-card { padding: 1rem; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); text-align: left; }
 .dashboard-summary .summary-value { font-size: 1.65rem; margin-bottom: 0.15rem; }
