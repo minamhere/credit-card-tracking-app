@@ -150,6 +150,80 @@ CREATE TABLE IF NOT EXISTS email_ingestions (
 );
 CREATE INDEX IF NOT EXISTS email_ingestions_status_idx ON email_ingestions (processing_status, received_at DESC);
 
+-- Plaid connection state and review-first external transaction staging.
+CREATE TABLE IF NOT EXISTS financial_connections (
+    id SERIAL PRIMARY KEY,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL DEFAULT 'plaid' CHECK (provider IN ('plaid')),
+    provider_item_id TEXT NOT NULL,
+    environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
+    access_token_ciphertext TEXT NOT NULL,
+    access_token_nonce TEXT NOT NULL,
+    access_token_auth_tag TEXT NOT NULL,
+    access_token_key_version INTEGER NOT NULL DEFAULT 1,
+    sync_cursor TEXT,
+    status TEXT NOT NULL DEFAULT 'account_selection'
+        CHECK (status IN ('account_selection', 'healthy', 'attention_required', 'error', 'disconnected')),
+    last_error_code TEXT,
+    last_error_request_id TEXT,
+    last_attempt_at TIMESTAMP,
+    last_success_at TIMESTAMP,
+    consent_expiration_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (provider, provider_item_id),
+    UNIQUE (person_id, provider, environment)
+);
+
+CREATE TABLE IF NOT EXISTS financial_accounts (
+    id SERIAL PRIMARY KEY,
+    connection_id INTEGER NOT NULL REFERENCES financial_connections(id) ON DELETE CASCADE,
+    provider_account_id TEXT NOT NULL,
+    persistent_account_id TEXT,
+    display_name TEXT NOT NULL,
+    official_name TEXT,
+    account_type TEXT,
+    account_subtype TEXT,
+    mask TEXT,
+    selected BOOLEAN NOT NULL DEFAULT FALSE,
+    discovered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (connection_id, provider_account_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS financial_accounts_one_selected_idx
+    ON financial_accounts (connection_id) WHERE selected;
+
+CREATE TABLE IF NOT EXISTS external_transactions (
+    id SERIAL PRIMARY KEY,
+    provider TEXT NOT NULL DEFAULT 'plaid' CHECK (provider IN ('plaid')),
+    provider_transaction_id TEXT NOT NULL,
+    connection_id INTEGER NOT NULL REFERENCES financial_connections(id) ON DELETE CASCADE,
+    financial_account_id INTEGER NOT NULL REFERENCES financial_accounts(id) ON DELETE CASCADE,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    pending_provider_transaction_id TEXT,
+    pending BOOLEAN NOT NULL DEFAULT FALSE,
+    transaction_date DATE NOT NULL,
+    authorized_date DATE,
+    amount DECIMAL(14,2) NOT NULL,
+    raw_description TEXT NOT NULL,
+    merchant_name TEXT,
+    provider_category TEXT,
+    transaction_kind TEXT NOT NULL
+        CHECK (transaction_kind IN ('purchase', 'payment', 'refund', 'credit', 'interest', 'fee')),
+    raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    lifecycle_status TEXT NOT NULL DEFAULT 'staged'
+        CHECK (lifecycle_status IN ('staged', 'awaiting_review', 'imported', 'ignored', 'removed', 'conflicted')),
+    linked_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+    linked_account_event_id INTEGER REFERENCES account_events(id) ON DELETE SET NULL,
+    first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (provider, provider_transaction_id)
+);
+CREATE INDEX IF NOT EXISTS external_transactions_review_idx
+    ON external_transactions (person_id, lifecycle_status, transaction_date DESC);
+CREATE INDEX IF NOT EXISTS external_transactions_connection_idx
+    ON external_transactions (connection_id, financial_account_id);
+
 -- One-time clean slate requested for the redesigned importer. Keep the people
 -- records so the existing cardholder selection remains usable, but remove all
 -- offer, transaction, import, credit, and merchant-classification data. The

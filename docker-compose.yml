@@ -41,6 +41,12 @@ services:
       M365_MAILBOX: ${M365_MAILBOX:-citi-offers@yither.com}
       M365_FOLDER_PATHS: ${M365_FOLDER_PATHS:-Inbox/Citi Offers/Chris,Inbox/Citi Offers/Janet}
       M365_AUTO_SYNC: ${M365_AUTO_SYNC:-true}
+      PLAID_CLIENT_ID: ${PLAID_CLIENT_ID}
+      PLAID_SECRET: ${PLAID_SECRET}
+      PLAID_ENV: ${PLAID_ENV:-sandbox}
+      PLAID_TOKEN_ENCRYPTION_KEY: ${PLAID_TOKEN_ENCRYPTION_KEY}
+      PLAID_AUTO_SYNC: ${PLAID_AUTO_SYNC:-false}
+      PLAID_SYNC_INTERVAL_MS: ${PLAID_SYNC_INTERVAL_MS:-21600000}
     volumes:
       - ${M365_CERT_HOST_PATH:-/volume1/docker/credit-card-tracker/secrets/m365-private-key.pem}:/run/secrets/m365-private-key.pem:ro
     depends_on:

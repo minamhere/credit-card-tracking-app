@@ -15,15 +15,21 @@
     "build": "node migrate.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "pg": "^8.11.3",
     "cors": "^2.8.5",
-    "path": "^0.12.7"
+    "express": "^4.18.2",
+    "path": "^0.12.7",
+    "pg": "^8.11.3",
+    "plaid": "^47.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["credit-card", "tracking", "finance", "offers"],
+  "keywords": [
+    "credit-card",
+    "tracking",
+    "finance",
+    "offers"
+  ],
   "author": "",
   "license": "MIT"
 }
