@@ -87,3 +87,6 @@ Thumbs.db
 postgres-data/
 *.tar.gz
 .env
+
+# Isolated feature worktrees
+.worktrees/
