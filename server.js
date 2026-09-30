@@ -8,6 +8,9 @@ const OfferEngine = require('./offer-engine');
 const OfferEmailParser = require('./offer-email-parser');
 const CreditMatcher = require('./credit-matcher');
 const M365 = require('./m365');
+const { loadPlaidConfig } = require('./plaid-config');
+const { createPlaidClient } = require('./plaid-client');
+const { createConnectionService } = require('./plaid-connections');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -24,6 +27,27 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: shouldUseSSL ? { rejectUnauthorized: false } : false
 });
+
+const plaidConfig = loadPlaidConfig();
+const plaidClient = plaidConfig.clientId ? createPlaidClient(plaidConfig) : null;
+const plaidConnections = plaidClient ? createConnectionService({ pool, plaidClient, config: plaidConfig }) : null;
+
+function requirePlaid(res) {
+  if (plaidConnections) return true;
+  res.status(503).json({ error: 'Plaid is not configured.' });
+  return false;
+}
+
+function positiveInteger(value, name) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${name} must be a positive integer.`);
+  return parsed;
+}
+
+function plaidRouteError(res, error) {
+  const status = /not found/i.test(error.message) ? 404 : 400;
+  res.status(status).json({ error: error.message, code: error.code || undefined, requestId: error.requestId || undefined });
+}
 
 function normalizeMerchant(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
@@ -286,6 +310,57 @@ app.delete('/api/people/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting person:', err);
     res.status(500).json({ error: 'Failed to delete person' });
+  }
+});
+
+app.post('/api/plaid/link-token', async (req, res) => {
+  if (!requirePlaid(res)) return;
+  try {
+    res.json(await plaidConnections.createLinkToken(positiveInteger(req.body.personId, 'personId')));
+  } catch (error) {
+    plaidRouteError(res, error);
+  }
+});
+
+app.post('/api/plaid/exchange', async (req, res) => {
+  if (!requirePlaid(res)) return;
+  try {
+    const personId = positiveInteger(req.body.personId, 'personId');
+    res.json(await plaidConnections.exchangeAndDiscover(personId, req.body.publicToken));
+  } catch (error) {
+    plaidRouteError(res, error);
+  }
+});
+
+app.put('/api/plaid/connections/:id/account', async (req, res) => {
+  if (!requirePlaid(res)) return;
+  try {
+    const personId = positiveInteger(req.body.personId, 'personId');
+    const connectionId = positiveInteger(req.params.id, 'connectionId');
+    const accountId = positiveInteger(req.body.accountId, 'accountId');
+    res.json(await plaidConnections.selectAccount(personId, connectionId, accountId));
+  } catch (error) {
+    plaidRouteError(res, error);
+  }
+});
+
+app.get('/api/plaid/status', async (req, res) => {
+  if (!requirePlaid(res)) return;
+  try {
+    res.json(await plaidConnections.getStatus(positiveInteger(req.query.personId, 'personId')));
+  } catch (error) {
+    plaidRouteError(res, error);
+  }
+});
+
+app.delete('/api/plaid/connections/:id', async (req, res) => {
+  if (!requirePlaid(res)) return;
+  try {
+    const personId = positiveInteger(req.body.personId, 'personId');
+    const connectionId = positiveInteger(req.params.id, 'connectionId');
+    res.json(await plaidConnections.disconnect(personId, connectionId));
+  } catch (error) {
+    plaidRouteError(res, error);
   }
 });
 
