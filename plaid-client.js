@@ -82,6 +82,20 @@ function createPlaidClient(config, sdk = require('plaid')) {
     async removeItem(accessToken) {
       const response = await call(() => api.itemRemove({ access_token: accessToken }));
       return { removed: Boolean(response.data.removed), requestId: response.data.request_id };
+    },
+
+    async syncTransactions(accessToken, cursor = null) {
+      const request = { access_token: accessToken, count: 500 };
+      if (cursor) request.cursor = cursor;
+      const response = await call(() => api.transactionsSync(request));
+      return {
+        added: response.data.added || [],
+        modified: response.data.modified || [],
+        removed: response.data.removed || [],
+        nextCursor: response.data.next_cursor,
+        hasMore: Boolean(response.data.has_more),
+        requestId: response.data.request_id
+      };
     }
   };
 }

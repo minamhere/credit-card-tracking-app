@@ -76,3 +76,21 @@ test('converts Plaid failures to safe errors containing only operational identif
     return true;
   });
 });
+
+test('maps incremental transaction sync pages without exposing the access token', async () => {
+  const { createPlaidClient } = require('../plaid-client');
+  const fake = fakeSdk({
+    transactionsSync: async request => ({ data: {
+      added: [{ transaction_id: 'added-1' }], modified: [{ transaction_id: 'modified-1' }],
+      removed: [{ transaction_id: 'removed-1' }], next_cursor: 'cursor-2', has_more: true,
+      request_id: 'req-sync'
+    } })
+  });
+  const client = createPlaidClient(config, fake.module);
+  assert.deepEqual(await client.syncTransactions('access-secret', 'cursor-1'), {
+    added: [{ transaction_id: 'added-1' }], modified: [{ transaction_id: 'modified-1' }],
+    removed: [{ transaction_id: 'removed-1' }], nextCursor: 'cursor-2', hasMore: true, requestId: 'req-sync'
+  });
+  const request = fake.calls.find(([name]) => name === 'transactionsSync')[1];
+  assert.deepEqual(request, { access_token: 'access-secret', cursor: 'cursor-1', count: 500 });
+});

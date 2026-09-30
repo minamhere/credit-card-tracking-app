@@ -11,6 +11,7 @@ const M365 = require('./m365');
 const { loadPlaidConfig } = require('./plaid-config');
 const { createPlaidClient } = require('./plaid-client');
 const { createConnectionService } = require('./plaid-connections');
+const { createSyncService } = require('./plaid-sync');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -31,6 +32,7 @@ const pool = new Pool({
 const plaidConfig = loadPlaidConfig();
 const plaidClient = plaidConfig.clientId ? createPlaidClient(plaidConfig) : null;
 const plaidConnections = plaidClient ? createConnectionService({ pool, plaidClient, config: plaidConfig }) : null;
+const plaidSync = plaidClient ? createSyncService({ pool, plaidClient, connectionService: plaidConnections }) : null;
 
 function requirePlaid(res) {
   if (plaidConnections) return true;
@@ -359,6 +361,17 @@ app.delete('/api/plaid/connections/:id', async (req, res) => {
     const personId = positiveInteger(req.body.personId, 'personId');
     const connectionId = positiveInteger(req.params.id, 'connectionId');
     res.json(await plaidConnections.disconnect(personId, connectionId));
+  } catch (error) {
+    plaidRouteError(res, error);
+  }
+});
+
+app.post('/api/plaid/connections/:id/sync', async (req, res) => {
+  if (!requirePlaid(res)) return;
+  try {
+    const personId = positiveInteger(req.body.personId, 'personId');
+    const connectionId = positiveInteger(req.params.id, 'connectionId');
+    res.json(await plaidSync.syncConnection(personId, connectionId));
   } catch (error) {
     plaidRouteError(res, error);
   }
