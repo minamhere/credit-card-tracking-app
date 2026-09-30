@@ -70,6 +70,8 @@ docker-compose logs -f app
 - Open browser to `http://your-synology-ip:3000`
 - First load takes ~30 seconds (running migrations)
 
+Keep this address private to your LAN. Plaid uses outbound HTTPS and does not require port forwarding or a public reverse proxy.
+
 Your data will be stored in `/volume1/docker/credit-card-tracker/postgres-data/`
 
 ---
@@ -228,6 +230,20 @@ docker-compose up -d --build
 ```
 
 **Your data will be preserved** because it's stored in the mapped volume.
+
+## Optional Plaid Citi Transaction Sync
+
+Before enabling Plaid, copy `.env.example` to `.env`, add the Plaid credentials, and generate a dedicated encryption key with `openssl rand -base64 32`. Keep `.env` out of Git and restrict its permissions. Changing or losing this key makes stored Plaid tokens unreadable and requires reconnecting each Citi login.
+
+Deploy with `PLAID_ENV=sandbox` and `PLAID_AUTO_SYNC=false` first:
+
+```bash
+chmod 600 .env
+docker compose up -d --build
+docker compose logs --tail=150 app
+```
+
+Use [docs/PLAID-OPERATIONS.md](docs/PLAID-OPERATIONS.md) for the full Sandbox acceptance test and deliberate Production rollout. Do not connect a real Citi account until Sandbox sync, review, repeat-sync idempotency, and CSV reconciliation checks pass.
 
 ## Troubleshooting
 

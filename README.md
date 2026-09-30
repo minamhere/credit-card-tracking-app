@@ -5,6 +5,7 @@ A web application to track credit card spending offers and bonus qualifications 
 ## Features
 
 - **Citi CSV transaction import** with a review step before anything is saved
+- **Optional Plaid Citi sync** with encrypted credentials, per-cardholder connections, review-before-import, and resilient scheduled updates
 - **Duplicate protection** based on card holder, date, amount, and Citi merchant description
 - **Merchant category rules** that automatically classify future purchases into one or more bonus categories
 - **Shared Citi merchant mappings** for known grocery, gas, restaurant, retail, entertainment, and transportation merchants
@@ -111,6 +112,12 @@ The Docker deployment can read Citi messages from the configured shared mailbox 
 5. Open **Offers**, click **Test connection**, then **Sync now**.
 
 Offer reminders are linked to an existing offer when their normalized terms match. New or uncertain offers remain in a review queue. APR, balance-transfer, and Flex Loan promotions are ignored. The app syncs once shortly after startup and then daily; set `M365_AUTO_SYNC=false` to use manual synchronization only.
+
+### Citi Transactions with Plaid
+
+Plaid can retrieve transactions for one selected Citi credit card under each cardholder. Connections, review queues, and sync failures remain independent. Access tokens are encrypted in PostgreSQL, pending transactions stay staged, and imports require review before they affect offer tracking.
+
+The Synology deployment needs outbound HTTPS but no public inbound access, webhook, or public domain. Start in Sandbox with automatic sync disabled. See [Plaid Operations](docs/PLAID-OPERATIONS.md) for key generation, validation, Production rollout, reconnect, disconnect, rollback, and CSV fallback.
 
 ### Viewing Progress
 1. The "Dashboard" tab shows your real-time progress
