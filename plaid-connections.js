@@ -84,7 +84,7 @@ function createConnectionService({ pool, plaidClient, config }) {
         const connectionId = connectionResult.rows[0].id;
         const discovered = [];
         for (const account of accounts) {
-          await client.query(`
+          const accountResult = await client.query(`
             INSERT INTO financial_accounts
               (connection_id, provider_account_id, persistent_account_id, display_name,
                official_name, account_type, account_subtype, mask, selected)
@@ -98,9 +98,11 @@ function createConnectionService({ pool, plaidClient, config }) {
               mask = EXCLUDED.mask,
               selected = FALSE,
               updated_at = CURRENT_TIMESTAMP
+            RETURNING id
           `, [connectionId, account.accountId, account.persistentAccountId, account.name,
             account.officialName, account.type, account.subtype, account.mask]);
           discovered.push({
+            id: accountResult.rows[0]?.id,
             providerAccountId: account.accountId,
             name: account.name,
             officialName: account.officialName,

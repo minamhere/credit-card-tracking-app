@@ -136,6 +136,7 @@ class OfferTracker {
             await this.renderTransactions();
             await this.renderMerchantRules();
             await this.renderAccountEvents();
+            await this.renderPlaidConnection();
             console.log('Rendering offers...');
             await this.renderOffers();
             await this.renderM365Inbox();
@@ -196,6 +197,7 @@ class OfferTracker {
         this.clearImportPreview();
         await this.renderMerchantRules();
         await this.renderAccountEvents();
+        await this.renderPlaidConnection();
     }
 
     showPeopleModal() {
@@ -332,6 +334,8 @@ class OfferTracker {
             this.handleCitiCsv(e.target.files[0]);
         });
 
+        document.getElementById('plaid-connection').addEventListener('click', (event) => this.handlePlaidAction(event));
+
         document.getElementById('csv-import-preview').addEventListener('click', (e) => {
             if (e.target.id === 'confirm-csv-import') this.confirmCitiImport();
             if (e.target.id === 'cancel-csv-import') this.clearImportPreview();
@@ -391,6 +395,89 @@ class OfferTracker {
         const element = document.getElementById('csv-import-message');
         element.textContent = message;
         element.className = `import-message ${type}`.trim();
+    }
+
+    setPlaidMessage(message, type = '') {
+        const element = document.getElementById('plaid-message');
+        element.textContent = message;
+        element.className = `import-message ${type}`.trim();
+    }
+
+    async renderPlaidConnection() {
+        const container = document.getElementById('plaid-connection');
+        if (!this.dataManager.dbManager.getCurrentPerson()) {
+            container.innerHTML = '<p>Select a card holder to connect Citi.</p>';
+            return;
+        }
+        try {
+            const connections = await this.dataManager.dbManager.getPlaidStatus();
+            container.innerHTML = PlaidUi.renderPlaidConnections(connections, value => this.escapeHtml(value));
+        } catch (error) {
+            container.innerHTML = '<p>Unable to load Citi connection status.</p>';
+            this.setPlaidMessage(error.message, 'error');
+        }
+    }
+
+    async handlePlaidAction(event) {
+        const action = event.target.dataset.action;
+        if (!action) return;
+        const connectionElement = event.target.closest('[data-connection-id]');
+        const connectionId = connectionElement ? Number(connectionElement.dataset.connectionId) : null;
+        if (action === 'connect') await this.connectPlaid();
+        if (action === 'select-account') {
+            const choice = connectionElement.querySelector('input[type="radio"]:checked');
+            if (!choice) return this.setPlaidMessage('Select the Citi card to track.', 'error');
+            await this.selectPlaidAccount(connectionId, Number(choice.value));
+        }
+        if (action === 'sync') await this.syncPlaid(connectionId);
+        if (action === 'review') await this.reviewPlaidTransactions();
+        if (action === 'disconnect' && confirm('Disconnect this Citi card? Imported transactions will remain.')) await this.disconnectPlaid(connectionId);
+    }
+
+    async connectPlaid() {
+        if (!this.dataManager.dbManager.getCurrentPerson()) return this.setPlaidMessage('Select a card holder first.', 'error');
+        try {
+            const { linkToken } = await this.dataManager.dbManager.createPlaidLinkToken();
+            const handler = Plaid.create({
+                token: linkToken,
+                onSuccess: async publicToken => {
+                    await this.dataManager.dbManager.exchangePlaidToken(publicToken);
+                    this.setPlaidMessage('Citi connected. Select the card to track.', 'success');
+                    await this.renderPlaidConnection();
+                },
+                onExit: error => { if (error) this.setPlaidMessage('Citi connection was not completed.', 'error'); }
+            });
+            handler.open();
+        } catch (error) {
+            this.setPlaidMessage(error.message || 'Unable to connect Citi.', 'error');
+        }
+    }
+
+    async selectPlaidAccount(connectionId, accountId) {
+        try {
+            await this.dataManager.dbManager.selectPlaidAccount(connectionId, accountId);
+            this.setPlaidMessage('Citi card selected.', 'success');
+            await this.renderPlaidConnection();
+        } catch (error) { this.setPlaidMessage(error.message, 'error'); }
+    }
+
+    async syncPlaid(connectionId) {
+        try {
+            const result = await this.dataManager.dbManager.syncPlaidConnection(connectionId);
+            this.setPlaidMessage(`Sync complete: ${result.added} added, ${result.modified} updated, ${result.removed} removed.`, 'success');
+            await this.renderPlaidConnection();
+        } catch (error) { this.setPlaidMessage(error.message, 'error'); }
+    }
+
+    async reviewPlaidTransactions() { await this.loadPlaidReview(); }
+
+    async disconnectPlaid(connectionId) {
+        try {
+            await this.dataManager.dbManager.disconnectPlaidConnection(connectionId);
+            this.clearImportPreview();
+            this.setPlaidMessage('Citi disconnected.', 'success');
+            await this.renderPlaidConnection();
+        } catch (error) { this.setPlaidMessage(error.message, 'error'); }
     }
 
     clearImportPreview() {

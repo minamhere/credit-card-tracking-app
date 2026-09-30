@@ -1125,6 +1125,12 @@ button:hover {
     background: var(--bg-tertiary);
 }
 
+.plaid-panel { margin: 0.75rem 0 1rem; }
+.plaid-connection { border: 1px solid var(--border-color, #ccc); border-radius: 8px; padding: 0.8rem; margin-bottom: 0.75rem; }
+.plaid-connection.warning { border-color: #b7791f; }
+.plaid-account-choice { display: block; margin: 0.5rem 0; }
+.plaid-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
 .offer-import-panel {
     border: 1px solid var(--border-color);
     border-radius: 8px;

@@ -103,6 +103,11 @@
             <div id="transactions" class="tab-content">
                 <section class="import-panel">
                     <div class="section-heading">
+                        <div><h2>Automatic Citi Sync</h2><p>Connect one Citi card for this cardholder. Synced purchases remain reviewable before import.</p></div>
+                    </div>
+                    <div id="plaid-connection" class="plaid-panel" aria-live="polite"></div>
+                    <div id="plaid-message" class="import-message" aria-live="polite"></div>
+                    <div class="section-heading">
                         <div>
                             <h2>Import Citi Transactions</h2>
                             <p>Upload the CSV downloaded from Citi. Nothing is saved until you review and confirm.</p>
@@ -320,6 +325,8 @@
         </main>
     </div>
 
+    <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+    <script src="plaid-ui.js?v=20260929-1"></script>
     <script src="citi-csv.js?v=20260928-5"></script>
     <script src="offer-email-parser.js?v=20260928-5"></script>
     <script src="offer-engine.js?v=20260928-5"></script>

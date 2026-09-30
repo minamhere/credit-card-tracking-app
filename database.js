@@ -343,6 +343,44 @@ class DatabaseManager {
         return response.json();
     }
 
+    async createPlaidLinkToken() {
+        const response = await fetch(`${this.baseUrl}/api/plaid/link-token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId }) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to start Citi connection');
+        return response.json();
+    }
+
+    async exchangePlaidToken(publicToken) {
+        const response = await fetch(`${this.baseUrl}/api/plaid/exchange`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId, publicToken }) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to finish Citi connection');
+        return response.json();
+    }
+
+    async selectPlaidAccount(connectionId, accountId) {
+        const response = await fetch(`${this.baseUrl}/api/plaid/connections/${connectionId}/account`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId, accountId }) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to select Citi account');
+        return response.json();
+    }
+
+    async getPlaidStatus() {
+        if (!this.currentPersonId) return [];
+        const response = await fetch(`${this.baseUrl}/api/plaid/status?personId=${encodeURIComponent(this.currentPersonId)}`);
+        if (response.status === 503) return [];
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to load Citi connection');
+        return response.json();
+    }
+
+    async syncPlaidConnection(connectionId) {
+        const response = await fetch(`${this.baseUrl}/api/plaid/connections/${connectionId}/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId }) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to sync Citi');
+        return response.json();
+    }
+
+    async disconnectPlaidConnection(connectionId) {
+        const response = await fetch(`${this.baseUrl}/api/plaid/connections/${connectionId}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId }) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to disconnect Citi');
+        return response.json();
+    }
+
     async getMerchantRules() {
         const response = await fetch(`${this.baseUrl}/api/merchant-rules`);
         if (!response.ok) throw new Error('Failed to load merchant rules');
