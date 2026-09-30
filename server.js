@@ -12,6 +12,7 @@ const { loadPlaidConfig } = require('./plaid-config');
 const { createPlaidClient } = require('./plaid-client');
 const { createConnectionService } = require('./plaid-connections');
 const { createSyncService } = require('./plaid-sync');
+const { projectExternalTransaction } = require('./transaction-reconciliation');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -733,6 +734,40 @@ app.delete('/api/transactions/:id', async (req, res) => {
 
 // Preview a normalized Citi CSV import. Parsing happens in the browser; the
 // server applies saved category rules and checks the authoritative database.
+app.get('/api/plaid/review', async (req, res) => {
+  try {
+    const personId = positiveInteger(req.query.personId, 'personId');
+    const [externalResult, rulesResult] = await Promise.all([
+      pool.query(`
+        SELECT et.* FROM external_transactions et
+        JOIN financial_accounts a ON a.id = et.financial_account_id AND a.selected = TRUE
+        WHERE et.person_id = $1 AND et.pending = FALSE
+          AND et.lifecycle_status IN ('awaiting_review', 'conflicted')
+        ORDER BY et.transaction_date, et.id
+      `, [personId]),
+      pool.query('SELECT * FROM merchant_category_rules ORDER BY LENGTH(merchant_pattern) DESC, id')
+    ]);
+    const transactions = [];
+    for (const row of externalResult.rows) {
+      const item = projectExternalTransaction(row);
+      if (!item) continue;
+      const matchingRule = rulesResult.rows.find(rule => ruleMatches(rule, item.originalMerchant));
+      const defaultRule = matchingRule ? null : findDefaultMerchantRule(item.originalMerchant);
+      transactions.push({
+        ...item,
+        categories: matchingRule ? matchingRule.categories : (defaultRule ? defaultRule.categories : []),
+        merchant: matchingRule ? matchingRule.merchant_name : (defaultRule ? defaultRule.merchant : item.merchant),
+        matchedRuleId: matchingRule ? matchingRule.id : null,
+        invalid: false,
+        duplicate: false
+      });
+    }
+    res.json({ transactions });
+  } catch (error) {
+    plaidRouteError(res, error);
+  }
+});
+
 app.post('/api/transaction-imports/preview', async (req, res) => {
   try {
     const { personId, transactions } = req.body;
@@ -761,8 +796,11 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
         SELECT id FROM transactions
         WHERE person_id = $1 AND (
           source_hash = $2 OR
+          (source = 'plaid' AND date::date BETWEEN $3::date - 3 AND $3::date + 3
+            AND ABS(ABS(amount) - ABS($4)) < 0.001
+            AND UPPER(TRIM(COALESCE(raw_merchant, merchant))) = $5) OR
           (source_hash IS NULL AND date = $3 AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
-        ) LIMIT 1
+        ) LIMIT 2
       `, [personId, hash, item.date, amount, normalizeMerchant(item.merchant)]);
       const matchingRule = rulesResult.rows.find(rule => ruleMatches(rule, item.merchant));
       const defaultRule = matchingRule ? null : findDefaultMerchantRule(item.merchant);
@@ -772,7 +810,8 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
         importOccurrence,
         originalMerchant: String(item.merchant).trim(),
         sourceHash: hash,
-        duplicate: duplicateResult.rows.length > 0,
+        duplicate: duplicateResult.rows.length === 1,
+        ambiguous: duplicateResult.rows.length > 1,
         invalid: false,
         categories: matchingRule ? matchingRule.categories : (defaultRule ? defaultRule.categories : []),
         merchant: matchingRule ? matchingRule.merchant_name : (defaultRule ? defaultRule.merchant : String(item.merchant).trim()),
@@ -815,14 +854,37 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
         continue;
       }
       const hash = transactionHash(personId, item);
+      let externalRow = null;
+      if (item.externalTransactionId != null) {
+        const externalResult = await client.query(`
+          SELECT * FROM external_transactions
+          WHERE id = $1 AND person_id = $2 AND pending = FALSE
+          FOR UPDATE
+        `, [positiveInteger(item.externalTransactionId, 'externalTransactionId'), personId]);
+        if (!externalResult.rows.length || externalResult.rows[0].lifecycle_status === 'removed') {
+          skipped++;
+          continue;
+        }
+        externalRow = externalResult.rows[0];
+        if (externalRow.lifecycle_status === 'imported') {
+          skipped++;
+          continue;
+        }
+      }
       const duplicate = await client.query(`
         SELECT id FROM transactions
         WHERE person_id = $1 AND (
           source_hash = $2 OR
+          (source = 'plaid' AND date::date BETWEEN $3::date - 3 AND $3::date + 3
+            AND ABS(ABS(amount) - ABS($4)) < 0.001
+            AND UPPER(TRIM(COALESCE(raw_merchant, merchant))) = $5) OR
           (source_hash IS NULL AND date = $3 AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
-        ) LIMIT 1
+        ) LIMIT 2
       `, [personId, hash, item.date, amount, normalizeMerchant(merchant)]);
       if (duplicate.rows.length > 0) {
+        if (externalRow && duplicate.rows.length === 1) {
+          await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [duplicate.rows[0].id, externalRow.id]);
+        }
         skipped++;
         continue;
       }
@@ -830,12 +892,16 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
       const categories = Array.isArray(item.categories)
         ? [...new Set(item.categories.map(value => String(value).trim().toLowerCase()).filter(Boolean))]
         : [];
-      await client.query(`
+      const insertedTransaction = await client.query(`
         INSERT INTO transactions
           (date, amount, merchant, categories, description, person_id, source, source_hash, raw_merchant, transaction_type, import_batch_id)
-        VALUES ($1, $2, $3, $4, $5, $6, 'citi_csv', $7, $8, $9, $10)
-      `, [item.date, amount, merchant, categories, item.description || '', personId, hash,
-          item.originalMerchant || merchant, transactionType, importBatchId]);
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id
+      `, [item.date, amount, merchant, categories, item.description || '', personId,
+          externalRow ? 'plaid' : 'citi_csv', hash, item.originalMerchant || merchant, transactionType, importBatchId]);
+      if (externalRow) {
+        await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [insertedTransaction.rows[0].id, externalRow.id]);
+      }
       imported++;
 
       if (item.saveRule && categories.length > 0) {
@@ -860,6 +926,15 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
         continue;
       }
       const hash = transactionHash(personId, item);
+      let externalRow = null;
+      if (item.externalTransactionId != null) {
+        const externalResult = await client.query(`SELECT * FROM external_transactions WHERE id = $1 AND person_id = $2 AND pending = FALSE FOR UPDATE`, [positiveInteger(item.externalTransactionId, 'externalTransactionId'), personId]);
+        if (!externalResult.rows.length || ['imported', 'removed'].includes(externalResult.rows[0].lifecycle_status)) {
+          skipped++;
+          continue;
+        }
+        externalRow = externalResult.rows[0];
+      }
       const result = await client.query(`
         INSERT INTO account_events
           (person_id, import_batch_id, event_date, amount, description, event_type, source_hash)
@@ -870,6 +945,7 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
       if (result.rows.length) {
         eventsImported++;
         importedEvents.push({ id: result.rows[0].id, date: item.date, amount, description, eventType });
+        if (externalRow) await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_account_event_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [result.rows[0].id, externalRow.id]);
       }
       else skipped++;
     }

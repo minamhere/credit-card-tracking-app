@@ -1,4 +1,5 @@
 const { normalizePlaidTransaction } = require('./plaid-transactions');
+const { reconcileImportedChange } = require('./transaction-reconciliation');
 
 const PAGINATION_MUTATION = 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION';
 
@@ -14,6 +15,17 @@ function createSyncService({ pool, plaidClient, connectionService }) {
 
   async function persistTransaction(client, connection, transaction) {
     const lifecycle = transaction.pending ? 'staged' : 'awaiting_review';
+    const existingResult = await client.query(`
+      SELECT et.transaction_date, et.amount, et.merchant_name, et.raw_description,
+             et.transaction_kind, et.linked_transaction_id, et.linked_account_event_id,
+             t.date AS linked_date, t.amount AS linked_amount, t.merchant AS linked_merchant,
+             t.raw_merchant AS linked_raw_merchant, t.transaction_type AS linked_transaction_type
+      FROM external_transactions et
+      LEFT JOIN transactions t ON t.id = et.linked_transaction_id
+      WHERE et.provider = 'plaid' AND et.provider_transaction_id = $1
+      FOR UPDATE OF et
+    `, [transaction.providerTransactionId]);
+    const previous = existingResult.rows[0] || null;
     await client.query(`
       INSERT INTO external_transactions
         (provider_transaction_id, connection_id, financial_account_id, person_id,
@@ -43,6 +55,29 @@ function createSyncService({ pool, plaidClient, connectionService }) {
       transaction.date, transaction.authorizedDate, transaction.amount, transaction.rawDescription,
       transaction.merchantName, transaction.providerCategory, transaction.transactionKind,
       transaction.rawPayload, lifecycle]);
+    if (previous?.linked_transaction_id) {
+      const snapshot = {
+        date: String(previous.transaction_date), amount: Math.abs(Number(previous.amount)),
+        merchant: previous.raw_description, transactionType: previous.transaction_kind
+      };
+      const current = {
+        date: String(previous.linked_date), amount: Number(previous.linked_amount),
+        merchant: previous.linked_raw_merchant || previous.linked_merchant,
+        transactionType: previous.linked_transaction_type
+      };
+      if (reconcileImportedChange(snapshot, current).status === 'safe_update') {
+        await client.query(`
+          UPDATE transactions SET date = $1, amount = $2, raw_merchant = $3,
+            transaction_type = $4, description = $5
+          WHERE id = $6
+        `, [transaction.date, Math.abs(transaction.amount), transaction.rawDescription,
+          transaction.transactionKind, transaction.pending ? 'Pending' : '', previous.linked_transaction_id]);
+      } else {
+        await client.query("UPDATE external_transactions SET lifecycle_status = 'conflicted' WHERE provider = 'plaid' AND provider_transaction_id = $1", [transaction.providerTransactionId]);
+      }
+    } else if (previous?.linked_account_event_id) {
+      await client.query("UPDATE external_transactions SET lifecycle_status = 'conflicted' WHERE provider = 'plaid' AND provider_transaction_id = $1", [transaction.providerTransactionId]);
+    }
     if (transaction.pendingProviderTransactionId) {
       await client.query(`
         UPDATE external_transactions SET lifecycle_status = 'removed', updated_at = CURRENT_TIMESTAMP

@@ -434,19 +434,35 @@ class OfferTracker {
         }
     }
 
+    async loadPlaidReview() {
+        if (!this.dataManager.dbManager.getCurrentPerson()) {
+            this.setImportMessage('Select a card holder before reviewing Plaid transactions.', 'error');
+            return;
+        }
+        try {
+            this.setImportMessage('Loading synced Citi transactions…');
+            const result = await this.dataManager.dbManager.getPlaidReview();
+            this.importPreview = result.transactions.map(item => ({ ...item, originalMerchant: item.originalMerchant || item.merchant }));
+            this.importMetadata = { source: 'plaid', recordCount: this.importPreview.length };
+            this.renderImportPreview([]);
+        } catch (error) {
+            this.setImportMessage(error.message || 'Unable to load synced transactions.', 'error');
+        }
+    }
+
     renderImportPreview(parseErrors = []) {
         const preview = document.getElementById('csv-import-preview');
         const isPurchase = item => (item.transactionType || 'purchase').toLowerCase() === 'purchase';
-        const importable = this.importPreview.filter(item => !item.duplicate && !item.invalid && item.amount > 0 && isPurchase(item)).length;
+        const importable = this.importPreview.filter(item => !item.duplicate && !item.ambiguous && !item.invalid && item.amount > 0 && isPurchase(item)).length;
         const duplicates = this.importPreview.filter(item => item.duplicate).length;
         const nonPurchases = this.importPreview.filter(item => item.amount <= 0 || !isPurchase(item)).length;
 
         const rows = this.importPreview.map((item, index) => {
-            const selected = !item.duplicate && !item.invalid && item.amount > 0 && isPurchase(item);
-            const status = item.invalid ? 'Invalid' : item.duplicate ? 'Already imported' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : 'Needs category';
+            const selected = !item.duplicate && !item.ambiguous && !item.invalid && item.amount > 0 && isPurchase(item);
+            const status = item.invalid ? 'Invalid' : item.ambiguous ? 'Possible duplicate — review source records' : item.duplicate ? 'Already imported' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : 'Needs category';
             return `
                 <tr class="${selected ? '' : 'excluded-row'}">
-                    <td><input type="checkbox" class="import-select" data-index="${index}" ${selected ? 'checked' : ''} ${item.duplicate || item.invalid || item.amount <= 0 ? 'disabled' : ''}></td>
+                    <td><input type="checkbox" class="import-select" data-index="${index}" ${selected ? 'checked' : ''} ${item.duplicate || item.ambiguous || item.invalid || item.amount <= 0 ? 'disabled' : ''}></td>
                     <td>${this.escapeHtml(item.date)}</td>
                     <td><input class="import-merchant" data-index="${index}" value="${this.escapeHtml(item.merchant)}"></td>
                     <td class="amount-cell">$${Math.abs(Number(item.amount)).toFixed(2)}</td>

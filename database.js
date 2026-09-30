@@ -336,6 +336,13 @@ class DatabaseManager {
         return response.json();
     }
 
+    async getPlaidReview() {
+        if (!this.currentPersonId) return { transactions: [] };
+        const response = await fetch(`${this.baseUrl}/api/plaid/review?personId=${encodeURIComponent(this.currentPersonId)}`);
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to load Plaid review');
+        return response.json();
+    }
+
     async getMerchantRules() {
         const response = await fetch(`${this.baseUrl}/api/merchant-rules`);
         if (!response.ok) throw new Error('Failed to load merchant rules');
