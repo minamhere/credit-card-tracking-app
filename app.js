@@ -430,6 +430,7 @@ class OfferTracker {
             await this.selectPlaidAccount(connectionId, Number(choice.value));
         }
         if (action === 'sync') await this.syncPlaid(connectionId);
+        if (action === 'reconnect') await this.reconnectPlaid(connectionId);
         if (action === 'review') await this.reviewPlaidTransactions();
         if (action === 'disconnect' && confirm('Disconnect this Citi card? Imported transactions will remain.')) await this.disconnectPlaid(connectionId);
     }
@@ -459,6 +460,21 @@ class OfferTracker {
             this.setPlaidMessage('Citi card selected.', 'success');
             await this.renderPlaidConnection();
         } catch (error) { this.setPlaidMessage(error.message, 'error'); }
+    }
+
+    async reconnectPlaid(connectionId) {
+        try {
+            const { linkToken } = await this.dataManager.dbManager.createPlaidUpdateLinkToken(connectionId);
+            const handler = Plaid.create({
+                token: linkToken,
+                onSuccess: async () => {
+                    await this.syncPlaid(connectionId);
+                    this.setPlaidMessage('Citi reconnected and synced.', 'success');
+                },
+                onExit: error => { if (error) this.setPlaidMessage('Citi reconnection was not completed.', 'error'); }
+            });
+            handler.open();
+        } catch (error) { this.setPlaidMessage(error.message || 'Unable to reconnect Citi.', 'error'); }
     }
 
     async syncPlaid(connectionId) {

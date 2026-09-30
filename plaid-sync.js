@@ -2,11 +2,16 @@ const { normalizePlaidTransaction } = require('./plaid-transactions');
 const { reconcileImportedChange } = require('./transaction-reconciliation');
 
 const PAGINATION_MUTATION = 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION';
+const ATTENTION_REQUIRED_CODES = new Set([
+  'ITEM_LOGIN_REQUIRED', 'PENDING_DISCONNECT', 'PENDING_EXPIRATION',
+  'ITEM_LOCKED', 'ITEM_NOT_SUPPORTED', 'INVALID_CREDENTIALS', 'OAUTH_ERROR'
+]);
 
 function createSyncService({ pool, plaidClient, connectionService }) {
   async function recordFailure(personId, connectionId, error) {
+    const status = ATTENTION_REQUIRED_CODES.has(error.code) ? 'attention_required' : 'error';
     await pool.query(`
-      UPDATE financial_connections SET status = 'error', last_error_code = $1,
+      UPDATE financial_connections SET status = '${status}', last_error_code = $1,
         last_error_request_id = $2, last_attempt_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $3 AND person_id = $4
@@ -165,7 +170,7 @@ function createSyncService({ pool, plaidClient, connectionService }) {
   }
 
   async function syncAllHealthy() {
-    const result = await pool.query("SELECT id, person_id FROM financial_connections WHERE status = 'healthy' ORDER BY id");
+    const result = await pool.query("SELECT id, person_id FROM financial_connections WHERE status IN ('healthy', 'error') ORDER BY id");
     const outcomes = [];
     for (const connection of result.rows) {
       try {

@@ -51,6 +51,17 @@ function createPlaidClient(config, sdk = require('plaid')) {
       return { linkToken: response.data.link_token, expiration: response.data.expiration, requestId: response.data.request_id };
     },
 
+    async createUpdateLinkToken(accessToken, personId) {
+      const response = await call(() => api.linkTokenCreate({
+        user: { client_user_id: `person-${personId}` },
+        client_name: 'Credit Card Offer Tracker',
+        access_token: accessToken,
+        country_codes: ['US'],
+        language: 'en'
+      }));
+      return { linkToken: response.data.link_token, expiration: response.data.expiration, requestId: response.data.request_id };
+    },
+
     async exchangePublicToken(publicToken) {
       const response = await call(() => api.itemPublicTokenExchange({ public_token: publicToken }));
       return { accessToken: response.data.access_token, itemId: response.data.item_id, requestId: response.data.request_id };

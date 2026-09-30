@@ -94,3 +94,17 @@ test('maps incremental transaction sync pages without exposing the access token'
   const request = fake.calls.find(([name]) => name === 'transactionsSync')[1];
   assert.deepEqual(request, { access_token: 'access-secret', cursor: 'cursor-1', count: 500 });
 });
+
+test('creates an update-mode Link token without requesting products or exchanging a token', async () => {
+  const { createPlaidClient } = require('../plaid-client');
+  const fake = fakeSdk();
+  const client = createPlaidClient(config, fake.module);
+  const result = await client.createUpdateLinkToken('access-secret', 42);
+  assert.equal(result.linkToken, 'link-token');
+  const request = fake.calls.find(([name]) => name === 'linkTokenCreate')[1];
+  assert.equal(request.access_token, 'access-secret');
+  assert.equal(request.user.client_user_id, 'person-42');
+  assert.equal('products' in request, false);
+  assert.equal('transactions' in request, false);
+  assert.equal(fake.calls.some(([name]) => name === 'itemPublicTokenExchange'), false);
+});

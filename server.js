@@ -12,6 +12,7 @@ const { loadPlaidConfig } = require('./plaid-config');
 const { createPlaidClient } = require('./plaid-client');
 const { createConnectionService } = require('./plaid-connections');
 const { createSyncService } = require('./plaid-sync');
+const { createPlaidScheduler } = require('./plaid-scheduler');
 const { projectExternalTransaction } = require('./transaction-reconciliation');
 
 const app = express();
@@ -34,6 +35,11 @@ const plaidConfig = loadPlaidConfig();
 const plaidClient = plaidConfig.clientId ? createPlaidClient(plaidConfig) : null;
 const plaidConnections = plaidClient ? createConnectionService({ pool, plaidClient, config: plaidConfig }) : null;
 const plaidSync = plaidClient ? createSyncService({ pool, plaidClient, connectionService: plaidConnections }) : null;
+const plaidScheduler = plaidSync ? createPlaidScheduler({
+  syncService: plaidSync,
+  intervalMs: plaidConfig.syncIntervalMs,
+  enabled: plaidConfig.autoSync
+}) : null;
 
 function requirePlaid(res) {
   if (plaidConnections) return true;
@@ -330,6 +336,17 @@ app.post('/api/plaid/exchange', async (req, res) => {
   try {
     const personId = positiveInteger(req.body.personId, 'personId');
     res.json(await plaidConnections.exchangeAndDiscover(personId, req.body.publicToken));
+  } catch (error) {
+    plaidRouteError(res, error);
+  }
+});
+
+app.post('/api/plaid/connections/:id/update-link-token', async (req, res) => {
+  if (!requirePlaid(res)) return;
+  try {
+    const personId = positiveInteger(req.body.personId, 'personId');
+    const connectionId = positiveInteger(req.params.id, 'connectionId');
+    res.json(await plaidConnections.createUpdateLinkToken(personId, connectionId));
   } catch (error) {
     plaidRouteError(res, error);
   }
@@ -1204,10 +1221,11 @@ app.post('/api/initialize', async (req, res) => {
   }
 });
 
-app.listen(port, async () => {
+const server = app.listen(port, async () => {
   console.log(`Server running on port ${port}`);
   console.log(`Visit http://localhost:${port} to view the app`);
   await runMigrations();
+  plaidScheduler?.start();
   const m365Config = M365.configFromEnv();
   const m365Configured = m365Config.tenantId && m365Config.clientId && m365Config.thumbprint;
   if (m365Configured && process.env.M365_AUTO_SYNC !== 'false') {
@@ -1215,3 +1233,14 @@ app.listen(port, async () => {
     setInterval(() => M365.syncAll(pool).catch(error => console.error('Scheduled M365 sync failed:', error)), 24 * 60 * 60 * 1000);
   }
 });
+
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal}; stopping scheduled work.`);
+  plaidScheduler?.stop();
+  server.close(() => pool.end().finally(() => process.exit(0)));
+}
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));

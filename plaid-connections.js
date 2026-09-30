@@ -51,6 +51,11 @@ function createConnectionService({ pool, plaidClient, config }) {
       return plaidClient.createLinkToken(personId);
     },
 
+    async createUpdateLinkToken(personId, connectionId) {
+      const connection = await this.getActiveConnection(personId, connectionId);
+      return plaidClient.createUpdateLinkToken(connection.accessToken, personId);
+    },
+
     async exchangeAndDiscover(personId, publicToken) {
       await requirePerson(personId);
       if (typeof publicToken !== 'string' || !publicToken) throw new Error('A Plaid public token is required.');

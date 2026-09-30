@@ -26,6 +26,7 @@ function fakePlaid(accounts = []) {
   return {
     calls,
     async createLinkToken(personId) { calls.push(['createLinkToken', personId]); return { linkToken: 'link-token', expiration: '2030-01-01' }; },
+    async createUpdateLinkToken(token, personId) { calls.push(['createUpdateLinkToken', token, personId]); return { linkToken: 'update-token', expiration: '2030-01-01' }; },
     async exchangePublicToken(token) { calls.push(['exchangePublicToken', token]); return { accessToken: 'access-secret', itemId: 'item-1' }; },
     async getAccounts(token) { calls.push(['getAccounts', token]); return accounts; },
     async getItem(token) { calls.push(['getItem', token]); return { consentExpirationTime: '2030-01-01T00:00:00Z' }; },
@@ -46,6 +47,17 @@ test('creates a Link token for the selected cardholder', async () => {
   const service = createConnectionService({ pool: scriptedPool([{ rows: [{ id: 7 }] }]), plaidClient: plaid, config });
   assert.deepEqual(await service.createLinkToken(7), { linkToken: 'link-token', expiration: '2030-01-01' });
   assert.deepEqual(plaid.calls, [['createLinkToken', 7]]);
+});
+
+test('creates an update-mode Link token from the encrypted active connection', async () => {
+  const { encryptAccessToken } = require('../plaid-token-crypto');
+  const { createConnectionService } = require('../plaid-connections');
+  const encrypted = encryptAccessToken('access-secret', config.tokenEncryptionKey, 'sandbox');
+  const row = { id: 12, person_id: 7, financial_account_id: 22, provider_account_id: 'acct-1', sync_cursor: 'cursor', environment: 'sandbox', access_token_ciphertext: encrypted.ciphertext, access_token_nonce: encrypted.nonce, access_token_auth_tag: encrypted.authTag, access_token_key_version: encrypted.keyVersion };
+  const plaid = fakePlaid();
+  const service = createConnectionService({ pool: scriptedPool([{ rows: [row] }]), plaidClient: plaid, config });
+  assert.deepEqual(await service.createUpdateLinkToken(7, 12), { linkToken: 'update-token', expiration: '2030-01-01' });
+  assert.deepEqual(plaid.calls, [['createUpdateLinkToken', 'access-secret', 7]]);
 });
 
 test('exchanges a public token, encrypts access, and discovers all accounts unselected', async () => {

@@ -123,3 +123,26 @@ test('syncAllHealthy isolates connection failures and continues', async () => {
   assert.equal(results[1].connectionId, 2);
   assert.equal(results[1].ok, true);
 });
+
+test('marks expired login and consent errors as attention required', async () => {
+  const { createSyncService } = require('../plaid-sync');
+  for (const code of ['ITEM_LOGIN_REQUIRED', 'PENDING_EXPIRATION']) {
+    const db = fakeDb();
+    const plaidClient = { async syncTransactions() { const error = new Error('safe'); error.code = code; error.requestId = 'request-id'; throw error; } };
+    const service = createSyncService({ pool: db, plaidClient, connectionService: connectionService() });
+    await assert.rejects(service.syncConnection(7, 3));
+    const failure = db.calls.find(call => call.sql.includes('last_error_code'));
+    assert.ok(failure.sql.includes("status = 'attention_required'"));
+    assert.deepEqual(failure.params, [code, 'request-id', 3, 7]);
+  }
+});
+
+test('keeps rate limiting retryable without requiring reconnection', async () => {
+  const { createSyncService } = require('../plaid-sync');
+  const db = fakeDb();
+  const plaidClient = { async syncTransactions() { const error = new Error('safe'); error.code = 'RATE_LIMIT_EXCEEDED'; throw error; } };
+  const service = createSyncService({ pool: db, plaidClient, connectionService: connectionService() });
+  await assert.rejects(service.syncConnection(7, 3));
+  const failure = db.calls.find(call => call.sql.includes('last_error_code'));
+  assert.ok(failure.sql.includes("status = 'error'"));
+});

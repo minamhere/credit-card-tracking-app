@@ -349,6 +349,12 @@ class DatabaseManager {
         return response.json();
     }
 
+    async createPlaidUpdateLinkToken(connectionId) {
+        const response = await fetch(`${this.baseUrl}/api/plaid/connections/${connectionId}/update-link-token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId }) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to reconnect Citi');
+        return response.json();
+    }
+
     async exchangePlaidToken(publicToken) {
         const response = await fetch(`${this.baseUrl}/api/plaid/exchange`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId, publicToken }) });
         if (!response.ok) throw new Error((await response.json()).error || 'Failed to finish Citi connection');
