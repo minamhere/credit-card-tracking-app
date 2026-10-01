@@ -221,6 +221,7 @@ CREATE TABLE IF NOT EXISTS external_transactions (
     conflict_reason TEXT,
     linked_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
     linked_account_event_id INTEGER REFERENCES account_events(id) ON DELETE SET NULL,
+    supersedes_external_transaction_id INTEGER REFERENCES external_transactions(id) ON DELETE SET NULL,
     first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (provider, provider_transaction_id)
@@ -235,6 +236,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS external_transactions_one_linked_event_idx
     ON external_transactions (linked_account_event_id) WHERE linked_account_event_id IS NOT NULL;
 ALTER TABLE external_transactions ADD COLUMN IF NOT EXISTS conflict_reason TEXT;
 ALTER TABLE external_transactions ADD COLUMN IF NOT EXISTS item_generation INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE external_transactions ADD COLUMN IF NOT EXISTS supersedes_external_transaction_id INTEGER REFERENCES external_transactions(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS external_transactions_one_superseder_idx
+    ON external_transactions (supersedes_external_transaction_id)
+    WHERE supersedes_external_transaction_id IS NOT NULL;
 
 -- One-time clean slate requested for the redesigned importer. Keep the people
 -- records so the existing cardholder selection remains usable, but remove all

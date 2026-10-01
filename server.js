@@ -836,6 +836,11 @@ app.post('/api/plaid/conflicts/:id/resolve', async (req, res) => {
       if (row.transaction_kind === 'purchase') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Transaction kind changed; keep the local record and resolve manually.' }); }
       await client.query('UPDATE account_events SET event_date = $1, amount = $2, description = $3, event_type = $4 WHERE id = $5',
         [projectExternalTransaction(row).date, -Math.abs(Number(row.amount)), row.raw_description, row.transaction_kind, row.linked_account_event_id]);
+      await client.query(`
+        UPDATE offer_credits oc SET amount = $1, posted_date = $2, description = $3
+        FROM account_events ae
+        WHERE ae.id = $4 AND ae.assigned_offer_credit_id = oc.id
+      `, [Math.abs(Number(row.amount)), projectExternalTransaction(row).date, row.raw_description, row.linked_account_event_id]);
     }
     await client.query("UPDATE external_transactions SET lifecycle_status = $1, conflict_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
       [action === 'keep' ? 'ignored' : 'imported', conflictId]);
@@ -982,7 +987,11 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(transactionDate || '') || !merchant || !Number.isFinite(amount) || amount <= 0 || transactionType !== 'purchase') { skipped++; continue; }
       if (externalRow) {
         const crossSource = await client.query(`
-          SELECT t.id, t.source FROM transactions t
+          SELECT t.id, t.source, old.id AS old_external_id FROM transactions t
+          LEFT JOIN external_transactions old ON old.linked_transaction_id = t.id
+            AND old.connection_id = $5 AND old.item_generation < $6
+          LEFT JOIN financial_accounts old_account ON old_account.id = old.financial_account_id
+          LEFT JOIN financial_accounts new_account ON new_account.id = $7
           WHERE t.person_id = $1
             AND t.date::date BETWEEN $2::date - 3 AND $2::date + 3
             AND ABS(ABS(t.amount) - ABS($3)) < 0.001
@@ -990,17 +999,16 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
             AND UPPER(TRIM(COALESCE(t.raw_merchant, t.merchant))) = $4
             AND (
               (t.source <> 'plaid' AND NOT EXISTS (SELECT 1 FROM external_transactions linked WHERE linked.linked_transaction_id = t.id))
-              OR (t.source = 'plaid' AND EXISTS (
-                SELECT 1 FROM external_transactions old
-                WHERE old.linked_transaction_id = t.id AND old.connection_id = $5
-                  AND old.item_generation < $6
-              ))
+              OR (old.id IS NOT NULL
+                AND COALESCE(old_account.persistent_account_id, old_account.provider_account_id)
+                  = COALESCE(new_account.persistent_account_id, new_account.provider_account_id)
+                AND NOT EXISTS (SELECT 1 FROM external_transactions successor WHERE successor.supersedes_external_transaction_id = old.id))
             )
           LIMIT 2
-        `, [personId, transactionDate, amount, normalizeMerchant(rawMerchant), externalRow.connection_id, externalRow.item_generation]);
+        `, [personId, transactionDate, amount, normalizeMerchant(rawMerchant), externalRow.connection_id, externalRow.item_generation, externalRow.financial_account_id]);
         if (crossSource.rows.length === 1) {
-          if (crossSource.rows[0].source === 'plaid') {
-            await client.query(`UPDATE external_transactions SET lifecycle_status = 'ignored', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [externalRow.id]);
+          if (crossSource.rows[0].old_external_id) {
+            await client.query(`UPDATE external_transactions SET lifecycle_status = 'ignored', supersedes_external_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [crossSource.rows[0].old_external_id, externalRow.id]);
           } else {
             await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [crossSource.rows[0].id, externalRow.id]);
           }
@@ -1087,17 +1095,35 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate || '') || !description || !Number.isFinite(amount)) { skipped++; continue; }
       const eventMatches = await client.query(`
-        SELECT ae.id FROM account_events ae
+        SELECT ae.id, old.id AS old_external_id FROM account_events ae
         JOIN import_batches ib ON ib.id = ae.import_batch_id
+        LEFT JOIN external_transactions old ON old.linked_account_event_id = ae.id
+          AND old.connection_id = $6 AND old.item_generation < $7
+        LEFT JOIN financial_accounts old_account ON old_account.id = old.financial_account_id
+        LEFT JOIN financial_accounts new_account ON new_account.id = $8
         WHERE ae.person_id = $1 AND ae.event_date BETWEEN $2::date - 3 AND $2::date + 3
-          AND ABS(ABS(ae.amount) - ABS($3)) < 0.001 AND ae.event_type = $4
+          AND ABS(ABS(ae.amount) - ABS($3)) < 0.001
+          AND (ae.event_type = $4 OR (ae.event_type IN ('payment', 'credit') AND $4 IN ('payment', 'credit')))
           AND UPPER(TRIM(ae.description)) = $5
-          AND ($6 = FALSE OR ib.source <> 'plaid')
+          AND (
+            ($9 = TRUE AND ib.source <> 'plaid' AND NOT EXISTS (SELECT 1 FROM external_transactions linked WHERE linked.linked_account_event_id = ae.id))
+            OR ($9 = FALSE AND ib.source = 'plaid')
+            OR (old.id IS NOT NULL
+              AND COALESCE(old_account.persistent_account_id, old_account.provider_account_id)
+                = COALESCE(new_account.persistent_account_id, new_account.provider_account_id)
+              AND NOT EXISTS (SELECT 1 FROM external_transactions successor WHERE successor.supersedes_external_transaction_id = old.id))
+          )
         LIMIT 20
-      `, [personId, eventDate, amount, eventType, normalizeMerchant(description), Boolean(externalRow)]);
+      `, [personId, eventDate, amount, eventType, normalizeMerchant(description), externalRow?.connection_id || 0,
+        externalRow?.item_generation || 0, externalRow?.financial_account_id || 0, Boolean(externalRow)]);
       const availableEvents = externalRow ? eventMatches.rows : eventMatches.rows.filter(row => !consumedEventIds.has(Number(row.id)));
       if (availableEvents.length === 1) {
-        if (externalRow) await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_account_event_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [availableEvents[0].id, externalRow.id]);
+        if (externalRow && availableEvents[0].old_external_id) {
+          await client.query(`UPDATE external_transactions SET lifecycle_status = 'ignored', supersedes_external_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [availableEvents[0].old_external_id, externalRow.id]);
+        } else if (externalRow) {
+          await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_account_event_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [availableEvents[0].id, externalRow.id]);
+        }
+        consumedEventIds.add(Number(availableEvents[0].id));
         skipped++;
         continue;
       }
