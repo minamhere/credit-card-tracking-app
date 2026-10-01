@@ -343,8 +343,8 @@ class DatabaseManager {
         return response.json();
     }
 
-    async createPlaidLinkToken() {
-        const response = await fetch(`${this.baseUrl}/api/plaid/link-token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId }) });
+    async createPlaidLinkToken(personId = this.currentPersonId) {
+        const response = await fetch(`${this.baseUrl}/api/plaid/link-token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId }) });
         if (!response.ok) throw new Error((await response.json()).error || 'Failed to start Citi connection');
         return response.json();
     }
@@ -355,8 +355,8 @@ class DatabaseManager {
         return response.json();
     }
 
-    async exchangePlaidToken(publicToken) {
-        const response = await fetch(`${this.baseUrl}/api/plaid/exchange`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId, publicToken }) });
+    async exchangePlaidToken(publicToken, personId = this.currentPersonId, linkSession) {
+        const response = await fetch(`${this.baseUrl}/api/plaid/exchange`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId, publicToken, linkSession }) });
         if (!response.ok) throw new Error((await response.json()).error || 'Failed to finish Citi connection');
         return response.json();
     }
@@ -375,8 +375,8 @@ class DatabaseManager {
         return response.json();
     }
 
-    async syncPlaidConnection(connectionId) {
-        const response = await fetch(`${this.baseUrl}/api/plaid/connections/${connectionId}/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId }) });
+    async syncPlaidConnection(connectionId, personId = this.currentPersonId) {
+        const response = await fetch(`${this.baseUrl}/api/plaid/connections/${connectionId}/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId }) });
         if (!response.ok) throw new Error((await response.json()).error || 'Failed to sync Citi');
         return response.json();
     }

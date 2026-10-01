@@ -56,11 +56,16 @@ test('logs per-connection failure safely and continues scheduling', async () => 
   const { createPlaidScheduler } = require('../plaid-scheduler');
   const timers = fakeTimers();
   const logs = [];
-  const scheduler = createPlaidScheduler({ syncService: { syncAllHealthy: async () => [{ connectionId: 2, ok: false, code: 'RATE_LIMIT_EXCEEDED' }, { connectionId: 3, ok: true }] }, intervalMs: 1000, logger: { error(message, details) { logs.push([message, details]); } }, ...timers });
+  const calls = [];
+  const scheduler = createPlaidScheduler({ syncService: { syncAllHealthy: async ids => { calls.push(ids); return calls.length === 1 ? [{ connectionId: 2, ok: false, code: 'RATE_LIMIT_EXCEEDED' }, { connectionId: 3, ok: true }] : [{ connectionId: 2, ok: true }]; } }, intervalMs: 1000, logger: { error(message, details) { logs.push([message, details]); } }, ...timers });
   scheduler.start();
   await timers.scheduled[0].fn();
   assert.deepEqual(logs, [['Plaid connection sync failed', { connectionId: 2, code: 'RATE_LIMIT_EXCEEDED' }]]);
   assert.equal(timers.scheduled.length, 2);
+  assert.equal(timers.scheduled[1].delay, 2000);
+  await timers.scheduled[1].fn();
+  assert.deepEqual(calls, [null, [2]]);
+  assert.equal(timers.scheduled[2].delay, 1000);
 });
 
 test('stop clears pending work and prevents a running attempt from rescheduling', async () => {

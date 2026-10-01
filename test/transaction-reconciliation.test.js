@@ -61,6 +61,17 @@ test('projects only posted records and converts application amount conventions',
   assert.equal(payment.isCredit, true);
 });
 
+test('projects PostgreSQL DATE values as calendar dates instead of timestamps', () => {
+  const { projectExternalTransaction } = require('../transaction-reconciliation');
+  const projected = projectExternalTransaction({
+    id: 5, pending: false, transaction_date: new Date(2026, 8, 28), amount: '42.17',
+    raw_description: 'STORE', merchant_name: 'Store', transaction_kind: 'purchase',
+    provider_transaction_id: 'plaid-1', lifecycle_status: 'awaiting_review', updated_at: new Date('2026-09-29T12:00:00Z')
+  });
+  assert.equal(projected.date, '2026-09-28');
+  assert.equal(projected.externalUpdatedAt, '2026-09-29T12:00:00.000Z');
+});
+
 test('decides whether provider changes may update an imported row', () => {
   const { reconcileImportedChange } = require('../transaction-reconciliation');
   const snapshot = { date: '2026-09-28', amount: 42.17, merchant: 'Store', transactionType: 'purchase' };

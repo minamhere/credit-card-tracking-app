@@ -1,5 +1,4 @@
 const { normalizePlaidTransaction } = require('./plaid-transactions');
-const { reconcileImportedChange } = require('./transaction-reconciliation');
 
 const PAGINATION_MUTATION = 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION';
 const ATTENTION_REQUIRED_CODES = new Set([
@@ -60,27 +59,7 @@ function createSyncService({ pool, plaidClient, connectionService }) {
       transaction.date, transaction.authorizedDate, transaction.amount, transaction.rawDescription,
       transaction.merchantName, transaction.providerCategory, transaction.transactionKind,
       transaction.rawPayload, lifecycle]);
-    if (previous?.linked_transaction_id) {
-      const snapshot = {
-        date: String(previous.transaction_date), amount: Math.abs(Number(previous.amount)),
-        merchant: previous.raw_description, transactionType: previous.transaction_kind
-      };
-      const current = {
-        date: String(previous.linked_date), amount: Number(previous.linked_amount),
-        merchant: previous.linked_raw_merchant || previous.linked_merchant,
-        transactionType: previous.linked_transaction_type
-      };
-      if (reconcileImportedChange(snapshot, current).status === 'safe_update') {
-        await client.query(`
-          UPDATE transactions SET date = $1, amount = $2, raw_merchant = $3,
-            transaction_type = $4, description = $5
-          WHERE id = $6
-        `, [transaction.date, Math.abs(transaction.amount), transaction.rawDescription,
-          transaction.transactionKind, transaction.pending ? 'Pending' : '', previous.linked_transaction_id]);
-      } else {
-        await client.query("UPDATE external_transactions SET lifecycle_status = 'conflicted' WHERE provider = 'plaid' AND provider_transaction_id = $1", [transaction.providerTransactionId]);
-      }
-    } else if (previous?.linked_account_event_id) {
+    if (previous?.linked_transaction_id || previous?.linked_account_event_id) {
       await client.query("UPDATE external_transactions SET lifecycle_status = 'conflicted' WHERE provider = 'plaid' AND provider_transaction_id = $1", [transaction.providerTransactionId]);
     }
     if (transaction.pendingProviderTransactionId) {
@@ -169,10 +148,12 @@ function createSyncService({ pool, plaidClient, connectionService }) {
     }
   }
 
-  async function syncAllHealthy() {
+  async function syncAllHealthy(onlyConnectionIds = null) {
     const result = await pool.query("SELECT id, person_id FROM financial_connections WHERE status IN ('healthy', 'error') ORDER BY id");
     const outcomes = [];
+    const allowed = onlyConnectionIds ? new Set(onlyConnectionIds.map(Number)) : null;
     for (const connection of result.rows) {
+      if (allowed && !allowed.has(Number(connection.id))) continue;
       try {
         outcomes.push({ connectionId: connection.id, ok: true, summary: await syncConnection(connection.person_id, connection.id) });
       } catch (error) {

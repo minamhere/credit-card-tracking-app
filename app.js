@@ -436,13 +436,14 @@ class OfferTracker {
     }
 
     async connectPlaid() {
-        if (!this.dataManager.dbManager.getCurrentPerson()) return this.setPlaidMessage('Select a card holder first.', 'error');
+        const initiatingPersonId = this.dataManager.dbManager.getCurrentPerson();
+        if (!initiatingPersonId) return this.setPlaidMessage('Select a card holder first.', 'error');
         try {
-            const { linkToken } = await this.dataManager.dbManager.createPlaidLinkToken();
+            const { linkToken, linkSession } = await this.dataManager.dbManager.createPlaidLinkToken(initiatingPersonId);
             const handler = Plaid.create({
                 token: linkToken,
                 onSuccess: async publicToken => {
-                    await this.dataManager.dbManager.exchangePlaidToken(publicToken);
+                    await this.dataManager.dbManager.exchangePlaidToken(publicToken, initiatingPersonId, linkSession);
                     this.setPlaidMessage('Citi connected. Select the card to track.', 'success');
                     await this.renderPlaidConnection();
                 },
@@ -463,13 +464,19 @@ class OfferTracker {
     }
 
     async reconnectPlaid(connectionId) {
+        const initiatingPersonId = this.dataManager.dbManager.getCurrentPerson();
         try {
             const { linkToken } = await this.dataManager.dbManager.createPlaidUpdateLinkToken(connectionId);
             const handler = Plaid.create({
                 token: linkToken,
                 onSuccess: async () => {
-                    await this.syncPlaid(connectionId);
-                    this.setPlaidMessage('Citi reconnected and synced.', 'success');
+                    try {
+                        const result = await this.dataManager.dbManager.syncPlaidConnection(connectionId, initiatingPersonId);
+                        this.setPlaidMessage(`Citi reconnected. Sync complete: ${result.added} added, ${result.modified} updated, ${result.removed} removed.`, 'success');
+                        await this.renderPlaidConnection();
+                    } catch (error) {
+                        this.setPlaidMessage(error.message || 'Citi reconnected, but synchronization failed.', 'error');
+                    }
                 },
                 onExit: error => { if (error) this.setPlaidMessage('Citi reconnection was not completed.', 'error'); }
             });
@@ -548,6 +555,9 @@ class OfferTracker {
             this.importPreview = result.transactions.map(item => ({ ...item, originalMerchant: item.originalMerchant || item.merchant }));
             this.importMetadata = { source: 'plaid', recordCount: this.importPreview.length };
             this.renderImportPreview([]);
+            if (result.conflictCount) {
+                this.setImportMessage(`${result.conflictCount} provider change${result.conflictCount === 1 ? '' : 's'} conflicted with imported data and was not re-imported. Keep the existing entry or resolve it manually before retrying.`, 'warning');
+            }
         } catch (error) {
             this.setImportMessage(error.message || 'Unable to load synced transactions.', 'error');
         }
@@ -556,13 +566,13 @@ class OfferTracker {
     renderImportPreview(parseErrors = []) {
         const preview = document.getElementById('csv-import-preview');
         const isPurchase = item => (item.transactionType || 'purchase').toLowerCase() === 'purchase';
-        const importable = this.importPreview.filter(item => !item.duplicate && !item.ambiguous && !item.invalid && item.amount > 0 && isPurchase(item)).length;
+        const importable = this.importPreview.filter(item => !item.duplicate && !item.ambiguous && !item.invalid && item.amount > 0 && isPurchase(item) && item.lifecycleStatus !== 'conflicted').length;
         const duplicates = this.importPreview.filter(item => item.duplicate).length;
         const nonPurchases = this.importPreview.filter(item => item.amount <= 0 || !isPurchase(item)).length;
 
         const rows = this.importPreview.map((item, index) => {
-            const selected = !item.duplicate && !item.ambiguous && !item.invalid && item.amount > 0 && isPurchase(item);
-            const status = item.invalid ? 'Invalid' : item.ambiguous ? 'Possible duplicate — review source records' : item.duplicate ? 'Already imported' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : 'Needs category';
+            const selected = !item.duplicate && !item.ambiguous && !item.invalid && item.amount > 0 && isPurchase(item) && item.lifecycleStatus !== 'conflicted';
+            const status = item.lifecycleStatus === 'conflicted' ? 'Conflict — resolve before importing' : item.invalid ? 'Invalid' : item.ambiguous ? 'Possible duplicate — review source records' : item.duplicate ? 'Already imported' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : 'Needs category';
             return `
                 <tr class="${selected ? '' : 'excluded-row'}">
                     <td><input type="checkbox" class="import-select" data-index="${index}" ${selected ? 'checked' : ''} ${item.duplicate || item.ambiguous || item.invalid || item.amount <= 0 ? 'disabled' : ''}></td>
@@ -588,7 +598,7 @@ class OfferTracker {
                 </table>
             </div>
             <div class="form-buttons import-actions">
-                <button type="button" id="confirm-csv-import" ${importable ? '' : 'disabled'}>Import selected purchases</button>
+                <button type="button" id="confirm-csv-import" ${(importable || nonPurchases) ? '' : 'disabled'}>Import reviewed items</button>
                 <button type="button" id="cancel-csv-import" class="btn-secondary">Cancel</button>
             </div>`;
         preview.classList.remove('hidden');
@@ -607,10 +617,6 @@ class OfferTracker {
             selected.push({ ...item, merchant, categories, saveRule, rulePattern: item.originalMerchant });
         });
 
-        if (!selected.length) {
-            this.setImportMessage('Select at least one purchase to import.', 'error');
-            return;
-        }
         if (selected.some(item => !item.merchant)) {
             this.setImportMessage('Every selected row needs a merchant name.', 'error');
             return;
@@ -625,8 +631,13 @@ class OfferTracker {
         button.textContent = 'Importing…';
         try {
             const accountEvents = this.importPreview.filter(item =>
-                !item.duplicate && !item.invalid && ((item.transactionType || 'purchase').toLowerCase() !== 'purchase' || item.amount <= 0)
+                !item.duplicate && !item.invalid && item.lifecycleStatus !== 'conflicted' && ((item.transactionType || 'purchase').toLowerCase() !== 'purchase' || item.amount <= 0)
             );
+            if (!selected.length && !accountEvents.length) {
+                this.setImportMessage('Select at least one reviewed item to import.', 'error');
+                button.disabled = false;
+                return;
+            }
             const result = await this.dataManager.dbManager.confirmTransactionImport(selected, this.importMetadata || {}, accountEvents);
             selected.flatMap(item => item.categories).forEach(category => this.addCategory(category));
             this.clearImportPreview();

@@ -71,6 +71,10 @@ function transactionHash(personId, transaction) {
   return crypto.createHash('sha256').update(identity).digest('hex');
 }
 
+function providerTransactionHash(personId, providerTransactionId) {
+  return crypto.createHash('sha256').update(`plaid|${personId}|${providerTransactionId}`).digest('hex');
+}
+
 function ruleMatches(rule, merchant) {
   const candidate = normalizeMerchant(merchant);
   const pattern = normalizeMerchant(rule.merchant_pattern);
@@ -335,7 +339,7 @@ app.post('/api/plaid/exchange', async (req, res) => {
   if (!requirePlaid(res)) return;
   try {
     const personId = positiveInteger(req.body.personId, 'personId');
-    res.json(await plaidConnections.exchangeAndDiscover(personId, req.body.publicToken));
+    res.json(await plaidConnections.exchangeAndDiscover(personId, req.body.publicToken, req.body.linkSession));
   } catch (error) {
     plaidRouteError(res, error);
   }
@@ -758,10 +762,11 @@ app.get('/api/plaid/review', async (req, res) => {
       pool.query(`
         SELECT et.* FROM external_transactions et
         JOIN financial_accounts a ON a.id = et.financial_account_id AND a.selected = TRUE
+        JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $2
         WHERE et.person_id = $1 AND et.pending = FALSE
-          AND et.lifecycle_status IN ('awaiting_review', 'conflicted')
+          AND et.lifecycle_status = 'awaiting_review'
         ORDER BY et.transaction_date, et.id
-      `, [personId]),
+      `, [personId, plaidConfig.environment]),
       pool.query('SELECT * FROM merchant_category_rules ORDER BY LENGTH(merchant_pattern) DESC, id')
     ]);
     const transactions = [];
@@ -779,7 +784,8 @@ app.get('/api/plaid/review', async (req, res) => {
         duplicate: false
       });
     }
-    res.json({ transactions });
+    const conflictResult = await pool.query(`SELECT COUNT(*) AS count FROM external_transactions et JOIN financial_connections c ON c.id = et.connection_id WHERE et.person_id = $1 AND c.environment = $2 AND et.lifecycle_status = 'conflicted'`, [personId, plaidConfig.environment]);
+    res.json({ transactions, conflictCount: Number(conflictResult.rows[0]?.count || 0) });
   } catch (error) {
     plaidRouteError(res, error);
   }
@@ -863,41 +869,71 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
     let skipped = 0;
     const importedEvents = [];
     for (const item of transactions) {
-      const amount = Number(item.amount);
+      let amount = Number(item.amount);
       const merchant = String(item.merchant || '').trim();
-      const transactionType = String(item.transactionType || 'purchase').toLowerCase();
+      let transactionType = String(item.transactionType || 'purchase').toLowerCase();
+      let transactionDate = item.date;
+      let rawMerchant = item.originalMerchant || merchant;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date || '') || !merchant || !Number.isFinite(amount) || amount <= 0 || transactionType !== 'purchase') {
         skipped++;
         continue;
       }
-      const hash = transactionHash(personId, item);
+      let hash = transactionHash(personId, item);
       let externalRow = null;
       if (item.externalTransactionId != null) {
         const externalResult = await client.query(`
-          SELECT * FROM external_transactions
-          WHERE id = $1 AND person_id = $2 AND pending = FALSE
-          FOR UPDATE
-        `, [positiveInteger(item.externalTransactionId, 'externalTransactionId'), personId]);
-        if (!externalResult.rows.length || externalResult.rows[0].lifecycle_status === 'removed') {
+          SELECT et.* FROM external_transactions et
+          JOIN financial_accounts a ON a.id = et.financial_account_id AND a.selected = TRUE
+          JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $3
+          WHERE et.id = $1 AND et.person_id = $2 AND et.pending = FALSE
+            AND et.lifecycle_status = 'awaiting_review'
+          FOR UPDATE OF et
+        `, [positiveInteger(item.externalTransactionId, 'externalTransactionId'), personId, plaidConfig.environment]);
+        if (!externalResult.rows.length) {
           skipped++;
           continue;
         }
         externalRow = externalResult.rows[0];
-        if (externalRow.lifecycle_status === 'imported') {
+        if (item.externalUpdatedAt && new Date(item.externalUpdatedAt).getTime() !== new Date(externalRow.updated_at).getTime()) {
           skipped++;
           continue;
         }
+        transactionDate = projectExternalTransaction(externalRow).date;
+        amount = Math.abs(Number(externalRow.amount));
+        transactionType = externalRow.transaction_kind;
+        rawMerchant = externalRow.raw_description;
+        hash = providerTransactionHash(personId, externalRow.provider_transaction_id);
+        if (transactionType !== 'purchase') { skipped++; continue; }
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(transactionDate || '') || !merchant || !Number.isFinite(amount) || amount <= 0 || transactionType !== 'purchase') { skipped++; continue; }
+      if (externalRow) {
+        const crossSource = await client.query(`
+          SELECT t.id FROM transactions t
+          WHERE t.person_id = $1 AND t.source <> 'plaid'
+            AND t.date::date BETWEEN $2::date - 3 AND $2::date + 3
+            AND ABS(ABS(t.amount) - ABS($3)) < 0.001
+            AND t.transaction_type = 'purchase'
+            AND UPPER(TRIM(COALESCE(t.raw_merchant, t.merchant))) = $4
+            AND NOT EXISTS (SELECT 1 FROM external_transactions linked WHERE linked.linked_transaction_id = t.id)
+          LIMIT 2
+        `, [personId, transactionDate, amount, normalizeMerchant(rawMerchant)]);
+        if (crossSource.rows.length === 1) {
+          await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [crossSource.rows[0].id, externalRow.id]);
+          skipped++;
+          continue;
+        }
+        if (crossSource.rows.length > 1) { skipped++; continue; }
       }
       const duplicate = await client.query(`
         SELECT id FROM transactions
         WHERE person_id = $1 AND (
           source_hash = $2 OR
-          (source = 'plaid' AND date::date BETWEEN $3::date - 3 AND $3::date + 3
+          ($6 = FALSE AND source = 'plaid' AND date::date BETWEEN $3::date - 3 AND $3::date + 3
             AND ABS(ABS(amount) - ABS($4)) < 0.001
             AND UPPER(TRIM(COALESCE(raw_merchant, merchant))) = $5) OR
           (source_hash IS NULL AND date = $3 AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
         ) LIMIT 2
-      `, [personId, hash, item.date, amount, normalizeMerchant(merchant)]);
+      `, [personId, hash, transactionDate, amount, normalizeMerchant(rawMerchant), Boolean(externalRow)]);
       if (duplicate.rows.length > 0) {
         if (externalRow && duplicate.rows.length === 1) {
           await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [duplicate.rows[0].id, externalRow.id]);
@@ -914,8 +950,8 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
           (date, amount, merchant, categories, description, person_id, source, source_hash, raw_merchant, transaction_type, import_batch_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id
-      `, [item.date, amount, merchant, categories, item.description || '', personId,
-          externalRow ? 'plaid' : 'citi_csv', hash, item.originalMerchant || merchant, transactionType, importBatchId]);
+      `, [transactionDate, amount, merchant, categories, item.description || '', personId,
+          externalRow ? 'plaid' : 'citi_csv', hash, rawMerchant, transactionType, importBatchId]);
       if (externalRow) {
         await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [insertedTransaction.rows[0].id, externalRow.id]);
       }
@@ -935,33 +971,45 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
       }
     }
     for (const item of accountEvents) {
-      const amount = Number(item.amount);
-      const description = String(item.originalMerchant || item.merchant || '').trim();
-      const eventType = String(item.transactionType || item.description || 'account event').toLowerCase();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date || '') || !description || !Number.isFinite(amount)) {
-        skipped++;
-        continue;
-      }
-      const hash = transactionHash(personId, item);
+      let amount = Number(item.amount);
+      let description = String(item.originalMerchant || item.merchant || '').trim();
+      let eventType = String(item.transactionType || item.description || 'account event').toLowerCase();
+      let eventDate = item.date;
+      let hash = transactionHash(personId, item);
       let externalRow = null;
       if (item.externalTransactionId != null) {
-        const externalResult = await client.query(`SELECT * FROM external_transactions WHERE id = $1 AND person_id = $2 AND pending = FALSE FOR UPDATE`, [positiveInteger(item.externalTransactionId, 'externalTransactionId'), personId]);
-        if (!externalResult.rows.length || ['imported', 'removed'].includes(externalResult.rows[0].lifecycle_status)) {
+        const externalResult = await client.query(`
+          SELECT et.* FROM external_transactions et
+          JOIN financial_accounts a ON a.id = et.financial_account_id AND a.selected = TRUE
+          JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $3
+          WHERE et.id = $1 AND et.person_id = $2 AND et.pending = FALSE
+            AND et.lifecycle_status = 'awaiting_review'
+          FOR UPDATE OF et
+        `, [positiveInteger(item.externalTransactionId, 'externalTransactionId'), personId, plaidConfig.environment]);
+        if (!externalResult.rows.length) {
           skipped++;
           continue;
         }
         externalRow = externalResult.rows[0];
+        if (item.externalUpdatedAt && new Date(item.externalUpdatedAt).getTime() !== new Date(externalRow.updated_at).getTime()) { skipped++; continue; }
+        eventDate = projectExternalTransaction(externalRow).date;
+        amount = -Math.abs(Number(externalRow.amount));
+        description = externalRow.raw_description;
+        eventType = externalRow.transaction_kind;
+        hash = providerTransactionHash(personId, externalRow.provider_transaction_id);
+        if (eventType === 'purchase') { skipped++; continue; }
       }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate || '') || !description || !Number.isFinite(amount)) { skipped++; continue; }
       const result = await client.query(`
         INSERT INTO account_events
           (person_id, import_batch_id, event_date, amount, description, event_type, source_hash)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (person_id, source_hash) DO NOTHING
         RETURNING id
-      `, [personId, importBatchId, item.date, amount, description, eventType, hash]);
+      `, [personId, importBatchId, eventDate, amount, description, eventType, hash]);
       if (result.rows.length) {
         eventsImported++;
-        importedEvents.push({ id: result.rows[0].id, date: item.date, amount, description, eventType });
+        importedEvents.push({ id: result.rows[0].id, date: eventDate, amount, description, eventType });
         if (externalRow) await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_account_event_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [result.rows[0].id, externalRow.id]);
       }
       else skipped++;

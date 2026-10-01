@@ -33,9 +33,9 @@ function projectExternalTransaction(row) {
   const kind = row.transaction_kind;
   const purchase = kind === 'purchase';
   const amount = Number(row.amount);
-  return {
+  const projected = {
     externalTransactionId: row.id,
-    date: row.transaction_date,
+    date: formatCalendarDate(row.transaction_date),
     amount: purchase ? Math.abs(amount) : -Math.abs(amount),
     merchant: row.merchant_name || row.raw_description,
     originalMerchant: row.raw_description,
@@ -45,6 +45,18 @@ function projectExternalTransaction(row) {
     providerTransactionId: row.provider_transaction_id,
     lifecycleStatus: row.lifecycle_status
   };
+  if (row.updated_at != null) projected.externalUpdatedAt = row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at;
+  return projected;
+}
+
+function formatCalendarDate(value) {
+  if (value instanceof Date) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  return String(value || '').slice(0, 10);
 }
 
 function reconcileImportedChange(importSnapshot, currentTransaction, options = {}) {
@@ -55,4 +67,4 @@ function reconcileImportedChange(importSnapshot, currentTransaction, options = {
     : { status: 'conflicted' };
 }
 
-module.exports = { reconcileCandidate, projectExternalTransaction, reconcileImportedChange, normalizeMerchant };
+module.exports = { reconcileCandidate, projectExternalTransaction, reconcileImportedChange, normalizeMerchant, formatCalendarDate };

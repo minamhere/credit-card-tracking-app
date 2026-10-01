@@ -45,8 +45,24 @@ test('creates a Link token for the selected cardholder', async () => {
   const { createConnectionService } = require('../plaid-connections');
   const plaid = fakePlaid();
   const service = createConnectionService({ pool: scriptedPool([{ rows: [{ id: 7 }] }]), plaidClient: plaid, config });
-  assert.deepEqual(await service.createLinkToken(7), { linkToken: 'link-token', expiration: '2030-01-01' });
+  const result = await service.createLinkToken(7);
+  assert.equal(result.linkToken, 'link-token');
+  assert.ok(result.linkSession);
   assert.deepEqual(plaid.calls, [['createLinkToken', 7]]);
+});
+
+test('binds Link completion to the initiating cardholder and expiration', () => {
+  const { createLinkSession, verifyLinkSession } = require('../plaid-connections');
+  const session = createLinkSession(7, config.tokenEncryptionKey, 1000);
+  assert.doesNotThrow(() => verifyLinkSession(session, 7, config.tokenEncryptionKey, 2000));
+  assert.throws(() => verifyLinkSession(session, 8, config.tokenEncryptionKey, 2000), /another cardholder/);
+  assert.throws(() => verifyLinkSession(session, 7, config.tokenEncryptionKey, 16 * 60 * 1000), /expired/);
+});
+
+test('refuses a second Item while the cardholder already has an active connection', async () => {
+  const { createConnectionService } = require('../plaid-connections');
+  const service = createConnectionService({ pool: scriptedPool([{ rows: [{ id: 7, connection_status: 'healthy' }] }]), plaidClient: fakePlaid(), config });
+  await assert.rejects(service.createLinkToken(7), /already has a Plaid connection/);
 });
 
 test('creates an update-mode Link token from the encrypted active connection', async () => {
@@ -61,7 +77,7 @@ test('creates an update-mode Link token from the encrypted active connection', a
 });
 
 test('exchanges a public token, encrypts access, and discovers all accounts unselected', async () => {
-  const { createConnectionService } = require('../plaid-connections');
+  const { createConnectionService, createLinkSession } = require('../plaid-connections');
   const accounts = [
     { accountId: 'credit-1', name: 'Citi Card', officialName: 'Rewards', type: 'credit', subtype: 'credit card', mask: '1234', persistentAccountId: 'p-1' },
     { accountId: 'deposit-1', name: 'Checking', officialName: null, type: 'depository', subtype: 'checking', mask: '9876', persistentAccountId: null }
@@ -72,10 +88,12 @@ test('exchanges a public token, encrypts access, and discovers all accounts unse
     { rows: [{ id: 12 }] },
     { rows: [] },
     { rows: [] },
+    { rows: [] },
     { rows: [] }
   ]);
   const service = createConnectionService({ pool, plaidClient: fakePlaid(accounts), config });
-  const result = await service.exchangeAndDiscover(7, 'public-token');
+  const session = createLinkSession(7, config.tokenEncryptionKey);
+  const result = await service.exchangeAndDiscover(7, 'public-token', session);
 
   assert.equal(result.connection.id, 12);
   assert.equal(result.connection.status, 'account_selection');
@@ -122,6 +140,18 @@ test('rejects a non-credit account even when it belongs to the cardholder', asyn
   await assert.rejects(service.selectAccount(7, 12, 22), /credit-card/);
 });
 
+test('rejects switching tracked accounts after a cursor has advanced', async () => {
+  const { createConnectionService } = require('../plaid-connections');
+  const pool = scriptedPool([
+    { rows: [] },
+    { rows: [{ account_id: 23, account_type: 'credit', account_subtype: 'credit card', sync_cursor: 'cursor-1', selected_account_id: 22 }] },
+    { rows: [] },
+    { rows: [] }
+  ]);
+  const service = createConnectionService({ pool, plaidClient: fakePlaid(), config });
+  await assert.rejects(service.selectAccount(7, 12, 23), /Disconnect and reconnect/);
+});
+
 test('serializes status without access-token material', async () => {
   const { createConnectionService } = require('../plaid-connections');
   const row = {
@@ -142,8 +172,11 @@ test('disconnects the provider item and makes the stored token unusable', async 
   const { createConnectionService } = require('../plaid-connections');
   const encrypted = encryptAccessToken('access-secret', config.tokenEncryptionKey, 'sandbox');
   const pool = scriptedPool([
+    { rows: [] },
+    { rows: [] },
     { rows: [{ id: 12, environment: 'sandbox', access_token_ciphertext: encrypted.ciphertext, access_token_nonce: encrypted.nonce, access_token_auth_tag: encrypted.authTag, access_token_key_version: encrypted.keyVersion }] },
-    { rows: [{ id: 12 }] }
+    { rows: [{ id: 12 }] },
+    { rows: [] }
   ]);
   const plaid = fakePlaid();
   const service = createConnectionService({ pool, plaidClient: plaid, config });

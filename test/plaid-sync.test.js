@@ -124,6 +124,17 @@ test('syncAllHealthy isolates connection failures and continues', async () => {
   assert.equal(results[1].ok, true);
 });
 
+test('syncAllHealthy can retry only failed connection ids', async () => {
+  const { createSyncService } = require('../plaid-sync');
+  const db = fakeDb({ healthyConnections: [{ id: 1, person_id: 7 }, { id: 2, person_id: 8 }] });
+  const calls = [];
+  const plaidClient = { async syncTransactions(token) { calls.push(token); return { added: [], modified: [], removed: [], nextCursor: 'done', hasMore: false }; } };
+  const service = createSyncService({ pool: db, plaidClient, connectionService: connectionService() });
+  const results = await service.syncAllHealthy([2]);
+  assert.deepEqual(results.map(row => row.connectionId), [2]);
+  assert.deepEqual(calls, ['access-2']);
+});
+
 test('marks expired login and consent errors as attention required', async () => {
   const { createSyncService } = require('../plaid-sync');
   for (const code of ['ITEM_LOGIN_REQUIRED', 'PENDING_EXPIRATION']) {

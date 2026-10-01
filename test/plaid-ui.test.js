@@ -46,3 +46,10 @@ test('renders reconnect only for attention-required connections', () => {
   assert.match(html, /needs attention/);
   assert.doesNotMatch(html, /Sync now/);
 });
+
+test('renders a fresh connect action after disconnect', () => {
+  const { renderPlaidConnections } = require('../plaid-ui');
+  const html = renderPlaidConnections([{ id: 12, status: 'disconnected', accounts: [] }], escapeHtml);
+  assert.match(html, /Connect Citi/);
+  assert.doesNotMatch(html, /Sync now/);
+});

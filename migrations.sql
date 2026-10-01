@@ -186,12 +186,14 @@ CREATE TABLE IF NOT EXISTS financial_accounts (
     account_subtype TEXT,
     mask TEXT,
     selected BOOLEAN NOT NULL DEFAULT FALSE,
+    available BOOLEAN NOT NULL DEFAULT TRUE,
     discovered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (connection_id, provider_account_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS financial_accounts_one_selected_idx
     ON financial_accounts (connection_id) WHERE selected;
+ALTER TABLE financial_accounts ADD COLUMN IF NOT EXISTS available BOOLEAN NOT NULL DEFAULT TRUE;
 
 CREATE TABLE IF NOT EXISTS external_transactions (
     id SERIAL PRIMARY KEY,
@@ -223,6 +225,10 @@ CREATE INDEX IF NOT EXISTS external_transactions_review_idx
     ON external_transactions (person_id, lifecycle_status, transaction_date DESC);
 CREATE INDEX IF NOT EXISTS external_transactions_connection_idx
     ON external_transactions (connection_id, financial_account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS external_transactions_one_linked_transaction_idx
+    ON external_transactions (linked_transaction_id) WHERE linked_transaction_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS external_transactions_one_linked_event_idx
+    ON external_transactions (linked_account_event_id) WHERE linked_account_event_id IS NOT NULL;
 
 -- One-time clean slate requested for the redesigned importer. Keep the people
 -- records so the existing cardholder selection remains usable, but remove all

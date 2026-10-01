@@ -12,6 +12,7 @@ function createPlaidScheduler({
   let running = false;
   let stopped = true;
   let consecutiveFailures = 0;
+  let retryConnectionIds = null;
 
   function schedule(delay) {
     if (stopped || running) return;
@@ -23,8 +24,10 @@ function createPlaidScheduler({
     timer = null;
     running = true;
     try {
-      const outcomes = await syncService.syncAllHealthy();
-      consecutiveFailures = 0;
+      const outcomes = await syncService.syncAllHealthy(retryConnectionIds);
+      const failures = (outcomes || []).filter(outcome => !outcome.ok);
+      retryConnectionIds = failures.length ? failures.map(outcome => outcome.connectionId) : null;
+      consecutiveFailures = failures.length ? consecutiveFailures + 1 : 0;
       for (const outcome of outcomes || []) {
         if (!outcome.ok) logger.error('Plaid connection sync failed', { connectionId: outcome.connectionId, code: outcome.code });
       }
