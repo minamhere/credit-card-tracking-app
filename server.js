@@ -894,7 +894,7 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
           (source = 'plaid' AND date::date BETWEEN $3::date - 3 AND $3::date + 3
             AND ABS(ABS(amount) - ABS($4)) < 0.001
             AND UPPER(TRIM(COALESCE(raw_merchant, merchant))) = $5) OR
-          (source_hash IS NULL AND date = $3 AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
+          (source_hash IS NULL AND date::date = $3::date AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
         ) LIMIT 20
       `, [personId, hash, item.date, amount, normalizeMerchant(item.merchant), transactionType]) : await pool.query(`
         SELECT ae.id FROM account_events ae
@@ -1033,7 +1033,7 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
           ($6 = FALSE AND source = 'plaid' AND date::date BETWEEN $3::date - 3 AND $3::date + 3
             AND ABS(ABS(amount) - ABS($4)) < 0.001
             AND UPPER(TRIM(COALESCE(raw_merchant, merchant))) = $5) OR
-          (source_hash IS NULL AND date = $3 AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
+          (source_hash IS NULL AND date::date = $3::date AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
         ) LIMIT 20
       `, [personId, hash, transactionDate, amount, normalizeMerchant(rawMerchant), Boolean(externalRow), transactionType]);
       const duplicateRows = externalRow ? duplicate.rows : duplicate.rows.filter(row => !consumedTransactionIds.has(Number(row.id)));
