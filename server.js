@@ -14,6 +14,7 @@ const { createConnectionService } = require('./plaid-connections');
 const { createSyncService } = require('./plaid-sync');
 const { createPlaidScheduler } = require('./plaid-scheduler');
 const { projectExternalTransaction, claimUniqueMatch } = require('./transaction-reconciliation');
+const { findPurchaseMatches } = require('./purchase-reconciliation');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -771,18 +772,28 @@ app.get('/api/plaid/review', async (req, res) => {
       pool.query('SELECT * FROM merchant_category_rules ORDER BY LENGTH(merchant_pattern) DESC, id')
     ]);
     const transactions = [];
+    const claimedPurchaseIds = new Set();
     for (const row of externalResult.rows) {
       const item = projectExternalTransaction(row);
       if (!item) continue;
       const matchingRule = rulesResult.rows.find(rule => ruleMatches(rule, item.originalMerchant));
       const defaultRule = matchingRule ? null : findDefaultMerchantRule(item.originalMerchant);
+      const merchant = matchingRule ? matchingRule.merchant_name : (defaultRule ? defaultRule.merchant : item.merchant);
+      const matches = item.transactionType === 'purchase' ? await findPurchaseMatches(pool, {
+        personId, date: item.date, amount: item.amount, merchant, rawMerchant: item.originalMerchant,
+        external: true, connectionId: row.connection_id, itemGeneration: row.item_generation, accountId: row.financial_account_id
+      }) : [];
+      const allocation = claimUniqueMatch(matches, claimedPurchaseIds);
       transactions.push({
         ...item,
-        categories: matchingRule ? matchingRule.categories : (defaultRule ? defaultRule.categories : []),
-        merchant: matchingRule ? matchingRule.merchant_name : (defaultRule ? defaultRule.merchant : item.merchant),
+        categories: allocation.status === 'duplicate' ? (allocation.rows[0].categories || [])
+          : matchingRule ? matchingRule.categories : (defaultRule ? defaultRule.categories : []),
+        merchant,
         matchedRuleId: matchingRule ? matchingRule.id : null,
         invalid: false,
-        duplicate: false
+        duplicate: false,
+        existingMatch: allocation.status === 'duplicate',
+        ambiguous: allocation.status === 'ambiguous'
       });
     }
     const conflictResult = await pool.query(`
@@ -887,6 +898,9 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
       const hash = transactionHash(personId, itemWithOccurrence);
       const transactionType = String(item.transactionType || 'purchase').toLowerCase();
       const isPurchase = transactionType === 'purchase' && amount > 0;
+      const matchingRule = rulesResult.rows.find(rule => ruleMatches(rule, item.merchant));
+      const defaultRule = matchingRule ? null : findDefaultMerchantRule(item.merchant);
+      const merchant = matchingRule ? matchingRule.merchant_name : (defaultRule ? defaultRule.merchant : String(item.merchant).trim());
       const duplicateResult = isPurchase ? await pool.query(`
         SELECT id FROM transactions
         WHERE person_id = $1 AND transaction_type = $6 AND (
@@ -905,10 +919,12 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
         LIMIT 20
       `, [personId, item.date, amount, transactionType, normalizeMerchant(item.merchant)]);
       const claimed = isPurchase ? claimedTransactionIds : claimedEventIds;
-      const allocation = claimUniqueMatch(duplicateResult.rows, claimed);
+      const crossSourceMatches = isPurchase ? await findPurchaseMatches(pool, {
+        personId, date: item.date, amount, merchant, rawMerchant: item.merchant, external: false
+      }) : [];
+      const allMatches = [...new Map([...duplicateResult.rows, ...crossSourceMatches].map(row => [Number(row.id), row])).values()];
+      const allocation = claimUniqueMatch(allMatches, claimed);
       const availableMatches = allocation.rows;
-      const matchingRule = rulesResult.rows.find(rule => ruleMatches(rule, item.merchant));
-      const defaultRule = matchingRule ? null : findDefaultMerchantRule(item.merchant);
       preview.push({
         ...item,
         amount,
@@ -921,7 +937,7 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
         reconciledEventId: !isPurchase && availableMatches.length === 1 ? Number(availableMatches[0].id) : null,
         invalid: false,
         categories: matchingRule ? matchingRule.categories : (defaultRule ? defaultRule.categories : []),
-        merchant: matchingRule ? matchingRule.merchant_name : (defaultRule ? defaultRule.merchant : String(item.merchant).trim()),
+        merchant,
         matchedRuleId: matchingRule ? matchingRule.id : null
       });
     }
@@ -994,26 +1010,10 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(transactionDate || '') || !merchant || !Number.isFinite(amount) || amount <= 0 || transactionType !== 'purchase') { skipped++; continue; }
       if (externalRow) {
-        const crossSource = await client.query(`
-          SELECT t.id, t.source, old.id AS old_external_id FROM transactions t
-          LEFT JOIN external_transactions old ON old.linked_transaction_id = t.id
-            AND old.connection_id = $5 AND old.item_generation < $6
-          LEFT JOIN financial_accounts old_account ON old_account.id = old.financial_account_id
-          LEFT JOIN financial_accounts new_account ON new_account.id = $7
-          WHERE t.person_id = $1
-            AND t.date::date BETWEEN $2::date - 3 AND $2::date + 3
-            AND ABS(ABS(t.amount) - ABS($3)) < 0.001
-            AND t.transaction_type = 'purchase'
-            AND UPPER(TRIM(COALESCE(t.raw_merchant, t.merchant))) = $4
-            AND (
-              (t.source <> 'plaid' AND NOT EXISTS (SELECT 1 FROM external_transactions linked WHERE linked.linked_transaction_id = t.id))
-              OR (old.id IS NOT NULL
-                AND COALESCE(old_account.persistent_account_id, old_account.provider_account_id)
-                  = COALESCE(new_account.persistent_account_id, new_account.provider_account_id)
-                AND NOT EXISTS (SELECT 1 FROM external_transactions successor WHERE successor.supersedes_external_transaction_id = old.id))
-            )
-          LIMIT 2
-        `, [personId, transactionDate, amount, normalizeMerchant(rawMerchant), externalRow.connection_id, externalRow.item_generation, externalRow.financial_account_id]);
+        const crossSource = { rows: await findPurchaseMatches(client, {
+          personId, date: transactionDate, amount, merchant, rawMerchant, external: true,
+          connectionId: externalRow.connection_id, itemGeneration: externalRow.item_generation, accountId: externalRow.financial_account_id
+        }, { lock: true }) };
         if (crossSource.rows.length === 1) {
           if (crossSource.rows[0].old_external_id) {
             await client.query('UPDATE external_transactions SET linked_transaction_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [crossSource.rows[0].old_external_id]);
@@ -1037,10 +1037,19 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
         ) LIMIT 20
       `, [personId, hash, transactionDate, amount, normalizeMerchant(rawMerchant), Boolean(externalRow), transactionType]);
       const duplicateRows = externalRow ? duplicate.rows : duplicate.rows.filter(row => !consumedTransactionIds.has(Number(row.id)));
+      if (!externalRow) {
+        const matches = await findPurchaseMatches(client, {
+          personId, date: transactionDate, amount, merchant, rawMerchant, external: false
+        }, { lock: true });
+        for (const match of matches) {
+          if (!consumedTransactionIds.has(Number(match.id)) && !duplicateRows.some(row => Number(row.id) === Number(match.id))) duplicateRows.push(match);
+        }
+      }
       if (duplicateRows.length > 0) {
         if (externalRow && duplicateRows.length === 1) {
           await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [duplicateRows[0].id, externalRow.id]);
         }
+        if (!externalRow && duplicateRows.length === 1) consumedTransactionIds.add(Number(duplicateRows[0].id));
         skipped++;
         continue;
       }

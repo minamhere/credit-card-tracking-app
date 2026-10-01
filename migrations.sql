@@ -21,6 +21,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS transactions_person_source_hash_idx
     ON transactions (person_id, source_hash)
     WHERE source_hash IS NOT NULL;
 
+-- Retain complete snapshots when explicitly repairing cross-source duplicates.
+CREATE TABLE IF NOT EXISTS transaction_duplicate_repairs (
+    duplicate_transaction_id INTEGER PRIMARY KEY,
+    original_transaction_id INTEGER NOT NULL,
+    external_transaction_id INTEGER NOT NULL,
+    duplicate_snapshot JSONB NOT NULL,
+    original_snapshot JSONB NOT NULL,
+    external_snapshot JSONB NOT NULL,
+    repaired_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Persistent merchant classification rules. A merchant may belong to multiple
 -- bonus categories, so categories is intentionally an array.
 CREATE TABLE IF NOT EXISTS merchant_category_rules (

@@ -577,7 +577,7 @@ class OfferTracker {
 
         const rows = this.importPreview.map((item, index) => {
             const selectable = !item.duplicate && !item.ambiguous && !item.invalid && item.lifecycleStatus !== 'conflicted';
-            const status = item.lifecycleStatus === 'conflicted' ? 'Conflict — resolve before importing' : item.invalid ? 'Invalid' : item.ambiguous ? 'Possible duplicate — review source records' : item.duplicate ? 'Already imported' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : 'Needs category';
+            const status = item.lifecycleStatus === 'conflicted' ? 'Conflict — resolve before importing' : item.invalid ? 'Invalid' : item.ambiguous ? 'Possible duplicate — review source records' : item.duplicate ? 'Already imported' : item.existingMatch ? 'Matches existing — select to link, not add another purchase' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : 'Needs category';
             return `
                 <tr class="excluded-row">
                     <td><input type="checkbox" class="import-select" data-index="${index}" ${selectable ? '' : 'disabled'}></td>

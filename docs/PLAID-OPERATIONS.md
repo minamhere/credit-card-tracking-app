@@ -92,3 +92,21 @@ If Plaid is unavailable or Production behavior is questionable:
 4. To roll the application version back, restore the prior Git revision/image without deleting the PostgreSQL volume. The added Plaid tables are additive and may remain unused.
 
 Do not run `docker compose down -v`; it deletes the database volume.
+
+## 6. Cross-source duplicate repair
+
+Plaid and Citi CSV often use different raw merchant descriptions. Purchases now reconcile using normalized raw descriptions within three days, or an exact same-day, same-amount, normalized display merchant match. Multiple candidates remain ambiguous; a linked CSV purchase cannot be consumed by a second Plaid provider ID. The Plaid review screen labels unique matches as **Matches existing**: select one to attach its provider record without adding a purchase or changing the original categories.
+
+For duplicates already imported, first update/rebuild the app and take a PostgreSQL backup. Run the read-only preview:
+
+```sh
+docker compose exec app node repair-plaid-duplicates.js
+```
+
+Review the duplicate/keep IDs, cardholder, date, merchant, and amount. The preview prints a token tied to the exact snapshots. Only after approving those pairs, run:
+
+```sh
+docker compose exec app node repair-plaid-duplicates.js --apply PREVIEW_TOKEN
+```
+
+This repair handles only unique one-to-one same-day purchase pairs between original CSV rows and redundant Plaid rows. It skips pending/conflicted/provider-modified records and Plaid copies referenced by offer credits. Applying archives complete snapshots in `transaction_duplicate_repairs`, moves each provider link to the original CSV transaction, and removes only the redundant Plaid transaction. Original categories and links stay intact; provider tokens and sync cursors are untouched. Changes are atomic, and a changed preview token aborts the operation. Running the preview again should no longer list repaired pairs. Account events and ambiguous purchases are not repaired automatically. Recovery is available from the database backup or archived snapshots; there is no automatic undo command.
