@@ -105,6 +105,7 @@ test('exchanges a public token, encrypts access, and discovers all accounts unse
   const insertConnection = pool.calls.find(call => call.sql.includes('INSERT INTO financial_connections'));
   assert.equal(insertConnection.params.includes('access-secret'), false);
   assert.equal(insertConnection.params[1], 'item-1');
+  assert.ok(insertConnection.sql.includes('import_start_date = EXCLUDED.import_start_date'));
   assert.ok(insertConnection.params[3].length > 10);
 });
 

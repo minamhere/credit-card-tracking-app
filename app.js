@@ -576,16 +576,16 @@ class OfferTracker {
         const nonPurchases = this.importPreview.filter(item => item.amount <= 0 || !isPurchase(item)).length;
 
         const rows = this.importPreview.map((item, index) => {
-            const selected = !item.duplicate && !item.ambiguous && !item.invalid && item.amount > 0 && isPurchase(item) && item.lifecycleStatus !== 'conflicted';
+            const selectable = !item.duplicate && !item.ambiguous && !item.invalid && item.lifecycleStatus !== 'conflicted';
             const status = item.lifecycleStatus === 'conflicted' ? 'Conflict — resolve before importing' : item.invalid ? 'Invalid' : item.ambiguous ? 'Possible duplicate — review source records' : item.duplicate ? 'Already imported' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : 'Needs category';
             return `
-                <tr class="${selected ? '' : 'excluded-row'}">
-                    <td><input type="checkbox" class="import-select" data-index="${index}" ${selected ? 'checked' : ''} ${item.duplicate || item.ambiguous || item.invalid || item.amount <= 0 || item.lifecycleStatus === 'conflicted' ? 'disabled' : ''}></td>
+                <tr class="excluded-row">
+                    <td><input type="checkbox" class="import-select" data-index="${index}" ${selectable ? '' : 'disabled'}></td>
                     <td>${this.escapeHtml(item.date)}</td>
                     <td><input class="import-merchant" data-index="${index}" value="${this.escapeHtml(item.merchant)}"></td>
                     <td class="amount-cell">$${Math.abs(Number(item.amount)).toFixed(2)}</td>
                     <td><input class="import-categories" data-index="${index}" value="${this.escapeHtml((item.categories || []).join(', '))}" placeholder="grocery, online"></td>
-                    <td><label class="remember-rule"><input type="checkbox" class="import-save-rule" data-index="${index}" ${item.matchedRuleId ? '' : 'checked'} ${selected ? '' : 'disabled'}> Remember</label></td>
+                    <td><label class="remember-rule"><input type="checkbox" class="import-save-rule" data-index="${index}" disabled> Remember</label></td>
                     <td><span class="import-status">${status}</span>${item.lifecycleStatus === 'conflicted' ? `<small>Local: ${this.escapeHtml(item.linkedValue?.date || '')} ${this.escapeHtml(item.linkedValue?.merchant || '')} $${Math.abs(Number(item.linkedValue?.amount || 0)).toFixed(2)}; Provider: ${this.escapeHtml(item.date)} ${this.escapeHtml(item.originalMerchant)} $${Math.abs(Number(item.amount)).toFixed(2)} (${this.escapeHtml(item.conflictReason)})</small><button type="button" data-conflict-action="keep" data-conflict-id="${item.externalTransactionId}">Keep local</button>${item.conflictReason === 'provider_removed' ? '' : `<button type="button" data-conflict-action="update" data-conflict-id="${item.externalTransactionId}">Use provider update</button>`}` : ''}</td>
                 </tr>`;
         }).join('');
@@ -593,9 +593,9 @@ class OfferTracker {
         preview.innerHTML = `
             <div class="import-summary">
                 <strong>${importable} purchases ready</strong>
-                <span>${duplicates} duplicates, ${nonPurchases} non-purchases, ${parseErrors.length} invalid rows excluded</span>
+                <span>${duplicates} duplicates, ${nonPurchases} account events, ${parseErrors.length} invalid rows</span>
             </div>
-            <p class="import-help">Enter one or more comma-separated bonus categories. “Remember” saves the Citi description as a merchant rule for future imports.</p>
+            <p class="import-help">Nothing is selected automatically. Select only the purchases and account events you want to import. Purchases need comma-separated bonus categories. “Remember” saves a merchant rule for future imports.</p>
             <div class="import-table-wrap">
                 <table class="import-table">
                     <thead><tr><th>Import</th><th>Date</th><th>Merchant</th><th>Amount</th><th>Categories</th><th>Rule</th><th>Status</th></tr></thead>
@@ -607,11 +607,21 @@ class OfferTracker {
                 <button type="button" id="cancel-csv-import" class="btn-secondary">Cancel</button>
             </div>`;
         preview.classList.remove('hidden');
-        this.setImportMessage(`Review ${this.importPreview.length} CSV rows before importing.`, 'success');
+        preview.querySelectorAll('.import-select').forEach(checkbox => {
+            checkbox.addEventListener('change', () => {
+                const item = this.importPreview[Number(checkbox.dataset.index)];
+                checkbox.closest('tr').classList.toggle('excluded-row', !checkbox.checked);
+                const remember = preview.querySelector(`.import-save-rule[data-index="${checkbox.dataset.index}"]`);
+                remember.disabled = !checkbox.checked || !isPurchase(item) || item.amount <= 0;
+                if (remember.disabled) remember.checked = false;
+            });
+        });
+        this.setImportMessage(`Review ${this.importPreview.length} rows before importing. Nothing is selected yet.`, 'success');
     }
 
     async confirmCitiImport() {
         const selected = [];
+        const accountEvents = [];
         document.querySelectorAll('.import-select:checked').forEach(checkbox => {
             const index = Number(checkbox.dataset.index);
             const item = this.importPreview[index];
@@ -619,7 +629,9 @@ class OfferTracker {
             const categories = document.querySelector(`.import-categories[data-index="${index}"]`).value
                 .split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
             const saveRule = document.querySelector(`.import-save-rule[data-index="${index}"]`).checked;
-            selected.push({ ...item, merchant, categories, saveRule, rulePattern: item.originalMerchant });
+            const reviewed = { ...item, merchant, categories, saveRule, rulePattern: item.originalMerchant };
+            if ((item.transactionType || 'purchase').toLowerCase() !== 'purchase' || item.amount <= 0) accountEvents.push(reviewed);
+            else selected.push(reviewed);
         });
 
         if (selected.some(item => !item.merchant)) {
@@ -635,12 +647,10 @@ class OfferTracker {
         button.disabled = true;
         button.textContent = 'Importing…';
         try {
-            const accountEvents = this.importPreview.filter(item =>
-                !item.duplicate && !item.invalid && item.lifecycleStatus !== 'conflicted' && ((item.transactionType || 'purchase').toLowerCase() !== 'purchase' || item.amount <= 0)
-            );
             if (!selected.length && !accountEvents.length) {
                 this.setImportMessage('Select at least one reviewed item to import.', 'error');
                 button.disabled = false;
+                button.textContent = 'Import reviewed items';
                 return;
             }
             const result = await this.dataManager.dbManager.confirmTransactionImport(selected, this.importMetadata || {}, accountEvents);
@@ -660,7 +670,7 @@ class OfferTracker {
             await this.renderAccountEvents();
         } catch (error) {
             button.disabled = false;
-            button.textContent = 'Import selected purchases';
+            button.textContent = 'Import reviewed items';
             this.setImportMessage(error.message || 'Import failed.', 'error');
         }
     }

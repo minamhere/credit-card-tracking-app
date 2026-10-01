@@ -35,6 +35,7 @@ test('creates a transactions Link token without webhook, redirect, or PII', asyn
   assert.equal(configuration.baseOptions.headers['PLAID-SECRET'], 'super-secret');
   const request = fake.calls.find(([name]) => name === 'linkTokenCreate')[1];
   assert.deepEqual(request.products, ['transactions']);
+  assert.deepEqual(request.transactions, { days_requested: 60 });
   assert.deepEqual(request.country_codes, ['US']);
   assert.equal(request.user.client_user_id, 'person-42');
   assert.equal(request.client_name, 'Credit Card Offer Tracker');

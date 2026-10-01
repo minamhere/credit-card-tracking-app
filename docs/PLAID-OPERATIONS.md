@@ -71,6 +71,9 @@ The two connections are independent. A failure on one must not prevent the other
 
 ## 4. Routine operation and recovery
 
+- New Citi connections request 60 days of initial history. The initial import boundary is fixed when the connection is created; subsequent cursor-based syncs retrieve all new changes, even after a long gap. It is not a rolling 60-day filter.
+- Purchases, payments, credits, and other account events start unselected in review. Check only the rows you want; unselected rows are not imported. Merchant-rule saving also requires an explicit check.
+- On upgrading an existing connection, staged history older than 60 days before its original connection date is hidden from review and its count. No staged or imported data is deleted, the sync cursor is preserved, and reconnecting is not necessary. Previously imported records remain unchanged and provider conflicts remain visible.
 - Use **Sync now** for an immediate refresh. Normal automatic sync uses chained, non-overlapping runs.
 - A transient provider or rate-limit error is retried on a later scheduled run. Do not repeatedly click Sync.
 - If **Reconnect** appears, complete Citi authentication in Plaid Link and let the app sync again.

@@ -44,7 +44,7 @@ function createPlaidClient(config, sdk = require('plaid')) {
         user: { client_user_id: `person-${personId}` },
         client_name: 'Credit Card Offer Tracker',
         products: ['transactions'],
-        transactions: { days_requested: 730 },
+        transactions: { days_requested: 60 },
         country_codes: ['US'],
         language: 'en'
       }));

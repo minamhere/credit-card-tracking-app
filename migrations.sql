@@ -197,6 +197,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS financial_accounts_one_selected_idx
 ALTER TABLE financial_accounts ADD COLUMN IF NOT EXISTS available BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE financial_connections ADD COLUMN IF NOT EXISTS item_generation INTEGER NOT NULL DEFAULT 1;
 
+-- Fixed initial-history boundary, not a rolling lookback. Preserve staged and
+-- imported data while hiding unwanted history from existing connections.
+ALTER TABLE financial_connections ADD COLUMN IF NOT EXISTS import_start_date DATE;
+UPDATE financial_connections SET import_start_date = created_at::date - 60
+    WHERE import_start_date IS NULL;
+ALTER TABLE financial_connections ALTER COLUMN import_start_date SET DEFAULT (CURRENT_DATE - 60);
+ALTER TABLE financial_connections ALTER COLUMN import_start_date SET NOT NULL;
+
 CREATE TABLE IF NOT EXISTS external_transactions (
     id SERIAL PRIMARY KEY,
     provider TEXT NOT NULL DEFAULT 'plaid' CHECK (provider IN ('plaid')),

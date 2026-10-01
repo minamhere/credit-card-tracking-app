@@ -765,6 +765,7 @@ app.get('/api/plaid/review', async (req, res) => {
         JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $2
         WHERE et.person_id = $1 AND et.pending = FALSE
           AND et.lifecycle_status = 'awaiting_review'
+          AND et.transaction_date >= c.import_start_date
         ORDER BY et.transaction_date, et.id
       `, [personId, plaidConfig.environment]),
       pool.query('SELECT * FROM merchant_category_rules ORDER BY LENGTH(merchant_pattern) DESC, id')
@@ -972,6 +973,7 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
           JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $3
           WHERE et.id = $1 AND et.person_id = $2 AND et.pending = FALSE
             AND et.lifecycle_status = 'awaiting_review'
+            AND et.transaction_date >= c.import_start_date
           FOR UPDATE OF et
         `, [positiveInteger(item.externalTransactionId, 'externalTransactionId'), personId, plaidConfig.environment]);
         if (!externalResult.rows.length) {
@@ -1085,6 +1087,7 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
           JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $3
           WHERE et.id = $1 AND et.person_id = $2 AND et.pending = FALSE
             AND et.lifecycle_status = 'awaiting_review'
+            AND et.transaction_date >= c.import_start_date
           FOR UPDATE OF et
         `, [positiveInteger(item.externalTransactionId, 'externalTransactionId'), personId, plaidConfig.environment]);
         if (!externalResult.rows.length) {

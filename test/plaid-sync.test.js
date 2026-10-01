@@ -83,6 +83,20 @@ test('rolls back staged records and leaves cursor unchanged after a database fai
   assert.ok(db.calls.some(call => call.sql.includes("status = 'error'")));
 });
 
+test('subsequent sync stages all new transactions without a rolling date filter', async () => {
+  const { createSyncService } = require('../plaid-sync');
+  const db = fakeDb();
+  const plaidClient = { async syncTransactions(_token, cursor) {
+    assert.equal(cursor, 'saved-cursor');
+    return { added: [raw('new-after-long-gap', 'selected-account', { date: '2026-01-01' })],
+      modified: [], removed: [], nextCursor: 'next-cursor', hasMore: false };
+  } };
+  const service = createSyncService({ pool: db, plaidClient, connectionService: connectionService({ cursor: 'saved-cursor' }) });
+  const result = await service.syncConnection(7, 3);
+  assert.equal(result.added, 1);
+  assert.ok(db.calls.some(call => call.sql.includes('INSERT INTO external_transactions') && call.params.includes('new-after-long-gap')));
+});
+
 test('restarts from the committed cursor after a pagination mutation', async () => {
   const { createSyncService } = require('../plaid-sync');
   const db = fakeDb();

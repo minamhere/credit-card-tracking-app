@@ -124,6 +124,7 @@ function createConnectionService({ pool, plaidClient, config }) {
             consent_expiration_at = EXCLUDED.consent_expiration_at,
             item_generation = financial_connections.item_generation + 1,
             sync_cursor = NULL,
+            import_start_date = EXCLUDED.import_start_date,
             status = 'account_selection',
             updated_at = CURRENT_TIMESTAMP
           RETURNING id, item_generation
@@ -208,7 +209,8 @@ function createConnectionService({ pool, plaidClient, config }) {
                c.last_success_at, c.consent_expiration_at, c.last_error_code,
                a.id AS account_id, a.provider_account_id, a.display_name, a.official_name,
                a.account_type, a.account_subtype, a.mask, a.selected,
-               COUNT(et.id) FILTER (WHERE et.lifecycle_status = 'awaiting_review') AS review_count
+               COUNT(et.id) FILTER (WHERE et.lifecycle_status = 'awaiting_review'
+                 AND et.transaction_date >= c.import_start_date) AS review_count
         FROM financial_connections c
         LEFT JOIN financial_accounts a ON a.connection_id = c.id
         LEFT JOIN external_transactions et ON et.connection_id = c.id
