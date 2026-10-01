@@ -339,6 +339,7 @@ class OfferTracker {
         document.getElementById('csv-import-preview').addEventListener('click', (e) => {
             if (e.target.id === 'confirm-csv-import') this.confirmCitiImport();
             if (e.target.id === 'cancel-csv-import') this.clearImportPreview();
+            if (e.target.dataset.conflictAction) this.resolvePlaidConflict(Number(e.target.dataset.conflictId), e.target.dataset.conflictAction);
         });
 
         document.getElementById('offer-form').addEventListener('submit', (e) => {
@@ -443,9 +444,11 @@ class OfferTracker {
             const handler = Plaid.create({
                 token: linkToken,
                 onSuccess: async publicToken => {
-                    await this.dataManager.dbManager.exchangePlaidToken(publicToken, initiatingPersonId, linkSession);
-                    this.setPlaidMessage('Citi connected. Select the card to track.', 'success');
-                    await this.renderPlaidConnection();
+                    try {
+                        await this.dataManager.dbManager.exchangePlaidToken(publicToken, initiatingPersonId, linkSession);
+                        this.setPlaidMessage('Citi connected. Select the card to track.', 'success');
+                        await this.renderPlaidConnection();
+                    } catch (error) { this.setPlaidMessage(error.message || 'Unable to finish the Citi connection.', 'error'); }
                 },
                 onExit: error => { if (error) this.setPlaidMessage('Citi connection was not completed.', 'error'); }
             });
@@ -537,6 +540,8 @@ class OfferTracker {
                 originalMerchant: item.originalMerchant || item.merchant
             }));
             this.importMetadata.recordCount = this.importPreview.length;
+            this.importMetadata.reconciledTransactionIds = this.importPreview.map(item => item.reconciledTransactionId).filter(Boolean);
+            this.importMetadata.reconciledEventIds = this.importPreview.map(item => item.reconciledEventId).filter(Boolean);
             this.renderImportPreview(parsed.errors);
         } catch (error) {
             this.clearImportPreview();
@@ -552,7 +557,7 @@ class OfferTracker {
         try {
             this.setImportMessage('Loading synced Citi transactions…');
             const result = await this.dataManager.dbManager.getPlaidReview();
-            this.importPreview = result.transactions.map(item => ({ ...item, originalMerchant: item.originalMerchant || item.merchant }));
+            this.importPreview = [...result.transactions, ...(result.conflicts || [])].map(item => ({ ...item, originalMerchant: item.originalMerchant || item.merchant }));
             this.importMetadata = { source: 'plaid', recordCount: this.importPreview.length };
             this.renderImportPreview([]);
             if (result.conflictCount) {
@@ -575,13 +580,13 @@ class OfferTracker {
             const status = item.lifecycleStatus === 'conflicted' ? 'Conflict — resolve before importing' : item.invalid ? 'Invalid' : item.ambiguous ? 'Possible duplicate — review source records' : item.duplicate ? 'Already imported' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : 'Needs category';
             return `
                 <tr class="${selected ? '' : 'excluded-row'}">
-                    <td><input type="checkbox" class="import-select" data-index="${index}" ${selected ? 'checked' : ''} ${item.duplicate || item.ambiguous || item.invalid || item.amount <= 0 ? 'disabled' : ''}></td>
+                    <td><input type="checkbox" class="import-select" data-index="${index}" ${selected ? 'checked' : ''} ${item.duplicate || item.ambiguous || item.invalid || item.amount <= 0 || item.lifecycleStatus === 'conflicted' ? 'disabled' : ''}></td>
                     <td>${this.escapeHtml(item.date)}</td>
                     <td><input class="import-merchant" data-index="${index}" value="${this.escapeHtml(item.merchant)}"></td>
                     <td class="amount-cell">$${Math.abs(Number(item.amount)).toFixed(2)}</td>
                     <td><input class="import-categories" data-index="${index}" value="${this.escapeHtml((item.categories || []).join(', '))}" placeholder="grocery, online"></td>
                     <td><label class="remember-rule"><input type="checkbox" class="import-save-rule" data-index="${index}" ${item.matchedRuleId ? '' : 'checked'} ${selected ? '' : 'disabled'}> Remember</label></td>
-                    <td><span class="import-status">${status}</span></td>
+                    <td><span class="import-status">${status}</span>${item.lifecycleStatus === 'conflicted' ? `<small>Local: ${this.escapeHtml(item.linkedValue?.date || '')} ${this.escapeHtml(item.linkedValue?.merchant || '')} $${Math.abs(Number(item.linkedValue?.amount || 0)).toFixed(2)}; Provider: ${this.escapeHtml(item.date)} ${this.escapeHtml(item.originalMerchant)} $${Math.abs(Number(item.amount)).toFixed(2)} (${this.escapeHtml(item.conflictReason)})</small><button type="button" data-conflict-action="keep" data-conflict-id="${item.externalTransactionId}">Keep local</button>${item.conflictReason === 'provider_removed' ? '' : `<button type="button" data-conflict-action="update" data-conflict-id="${item.externalTransactionId}">Use provider update</button>`}` : ''}</td>
                 </tr>`;
         }).join('');
 
@@ -658,6 +663,16 @@ class OfferTracker {
             button.textContent = 'Import selected purchases';
             this.setImportMessage(error.message || 'Import failed.', 'error');
         }
+    }
+
+    async resolvePlaidConflict(conflictId, action) {
+        try {
+            await this.dataManager.dbManager.resolvePlaidConflict(conflictId, action);
+            this.setImportMessage(action === 'keep' ? 'Kept the local record.' : 'Applied the provider update.', 'success');
+            await this.loadPlaidReview();
+            await this.renderTransactions();
+            await this.renderAccountEvents();
+        } catch (error) { this.setImportMessage(error.message || 'Unable to resolve conflict.', 'error'); }
     }
 
     async renderMerchantRules() {

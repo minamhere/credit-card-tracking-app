@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS financial_connections (
     person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
     provider TEXT NOT NULL DEFAULT 'plaid' CHECK (provider IN ('plaid')),
     provider_item_id TEXT NOT NULL,
+    item_generation INTEGER NOT NULL DEFAULT 1,
     environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
     access_token_ciphertext TEXT NOT NULL,
     access_token_nonce TEXT NOT NULL,
@@ -194,6 +195,7 @@ CREATE TABLE IF NOT EXISTS financial_accounts (
 CREATE UNIQUE INDEX IF NOT EXISTS financial_accounts_one_selected_idx
     ON financial_accounts (connection_id) WHERE selected;
 ALTER TABLE financial_accounts ADD COLUMN IF NOT EXISTS available BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE financial_connections ADD COLUMN IF NOT EXISTS item_generation INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS external_transactions (
     id SERIAL PRIMARY KEY,
@@ -202,6 +204,7 @@ CREATE TABLE IF NOT EXISTS external_transactions (
     connection_id INTEGER NOT NULL REFERENCES financial_connections(id) ON DELETE CASCADE,
     financial_account_id INTEGER NOT NULL REFERENCES financial_accounts(id) ON DELETE CASCADE,
     person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    item_generation INTEGER NOT NULL DEFAULT 1,
     pending_provider_transaction_id TEXT,
     pending BOOLEAN NOT NULL DEFAULT FALSE,
     transaction_date DATE NOT NULL,
@@ -215,6 +218,7 @@ CREATE TABLE IF NOT EXISTS external_transactions (
     raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     lifecycle_status TEXT NOT NULL DEFAULT 'staged'
         CHECK (lifecycle_status IN ('staged', 'awaiting_review', 'imported', 'ignored', 'removed', 'conflicted')),
+    conflict_reason TEXT,
     linked_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
     linked_account_event_id INTEGER REFERENCES account_events(id) ON DELETE SET NULL,
     first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -229,6 +233,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS external_transactions_one_linked_transaction_i
     ON external_transactions (linked_transaction_id) WHERE linked_transaction_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS external_transactions_one_linked_event_idx
     ON external_transactions (linked_account_event_id) WHERE linked_account_event_id IS NOT NULL;
+ALTER TABLE external_transactions ADD COLUMN IF NOT EXISTS conflict_reason TEXT;
+ALTER TABLE external_transactions ADD COLUMN IF NOT EXISTS item_generation INTEGER NOT NULL DEFAULT 1;
 
 -- One-time clean slate requested for the redesigned importer. Keep the people
 -- records so the existing cardholder selection remains usable, but remove all

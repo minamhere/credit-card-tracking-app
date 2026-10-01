@@ -14,6 +14,7 @@ function createSyncService({ pool, plaidClient, connectionService }) {
         last_error_request_id = $2, last_attempt_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $3 AND person_id = $4
+        AND status IN ('healthy', 'error', 'attention_required')
     `, [error.code || 'SYNC_FAILED', error.requestId || null, connectionId, personId]);
   }
 
@@ -33,10 +34,10 @@ function createSyncService({ pool, plaidClient, connectionService }) {
     await client.query(`
       INSERT INTO external_transactions
         (provider_transaction_id, connection_id, financial_account_id, person_id,
-         pending_provider_transaction_id, pending, transaction_date, authorized_date,
+         item_generation, pending_provider_transaction_id, pending, transaction_date, authorized_date,
          amount, raw_description, merchant_name, provider_category, transaction_kind,
          raw_payload, lifecycle_status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       ON CONFLICT (provider, provider_transaction_id) DO UPDATE SET
         pending_provider_transaction_id = EXCLUDED.pending_provider_transaction_id,
         pending = EXCLUDED.pending,
@@ -49,18 +50,18 @@ function createSyncService({ pool, plaidClient, connectionService }) {
         transaction_kind = EXCLUDED.transaction_kind,
         raw_payload = EXCLUDED.raw_payload,
         lifecycle_status = CASE
-          WHEN external_transactions.lifecycle_status IN ('imported', 'conflicted')
+          WHEN external_transactions.lifecycle_status IN ('imported', 'conflicted', 'ignored')
             THEN external_transactions.lifecycle_status
           ELSE EXCLUDED.lifecycle_status
         END,
         updated_at = CURRENT_TIMESTAMP
     `, [transaction.providerTransactionId, connection.id, connection.financialAccountId,
-      connection.personId, transaction.pendingProviderTransactionId, transaction.pending,
+      connection.personId, connection.itemGeneration || 1, transaction.pendingProviderTransactionId, transaction.pending,
       transaction.date, transaction.authorizedDate, transaction.amount, transaction.rawDescription,
       transaction.merchantName, transaction.providerCategory, transaction.transactionKind,
       transaction.rawPayload, lifecycle]);
     if (previous?.linked_transaction_id || previous?.linked_account_event_id) {
-      await client.query("UPDATE external_transactions SET lifecycle_status = 'conflicted' WHERE provider = 'plaid' AND provider_transaction_id = $1", [transaction.providerTransactionId]);
+      await client.query("UPDATE external_transactions SET lifecycle_status = 'conflicted', conflict_reason = 'provider_modified' WHERE provider = 'plaid' AND provider_transaction_id = $1", [transaction.providerTransactionId]);
     }
     if (transaction.pendingProviderTransactionId) {
       await client.query(`
@@ -103,6 +104,10 @@ function createSyncService({ pool, plaidClient, connectionService }) {
               lifecycle_status = CASE
                 WHEN linked_transaction_id IS NOT NULL OR linked_account_event_id IS NOT NULL THEN 'conflicted'
                 ELSE 'removed'
+              END,
+              conflict_reason = CASE
+                WHEN linked_transaction_id IS NOT NULL OR linked_account_event_id IS NOT NULL THEN 'provider_removed'
+                ELSE conflict_reason
               END,
               updated_at = CURRENT_TIMESTAMP
             WHERE provider = 'plaid' AND provider_transaction_id = $1
@@ -148,12 +153,16 @@ function createSyncService({ pool, plaidClient, connectionService }) {
     }
   }
 
-  async function syncAllHealthy(onlyConnectionIds = null) {
+  async function syncAllHealthy(options = null) {
     const result = await pool.query("SELECT id, person_id FROM financial_connections WHERE status IN ('healthy', 'error') ORDER BY id");
     const outcomes = [];
+    const onlyConnectionIds = Array.isArray(options) ? options : options?.onlyConnectionIds;
+    const excludeConnectionIds = Array.isArray(options) ? null : options?.excludeConnectionIds;
     const allowed = onlyConnectionIds ? new Set(onlyConnectionIds.map(Number)) : null;
+    const excluded = excludeConnectionIds ? new Set(excludeConnectionIds.map(Number)) : null;
     for (const connection of result.rows) {
       if (allowed && !allowed.has(Number(connection.id))) continue;
+      if (excluded && excluded.has(Number(connection.id))) continue;
       try {
         outcomes.push({ connectionId: connection.id, ok: true, summary: await syncConnection(connection.person_id, connection.id) });
       } catch (error) {

@@ -67,4 +67,12 @@ function reconcileImportedChange(importSnapshot, currentTransaction, options = {
     : { status: 'conflicted' };
 }
 
-module.exports = { reconcileCandidate, projectExternalTransaction, reconcileImportedChange, normalizeMerchant, formatCalendarDate };
+function claimUniqueMatch(rows, claimedIds = new Set()) {
+  const available = rows.filter(row => !claimedIds.has(Number(row.id)));
+  if (available.length > 1) return { status: 'ambiguous', rows: available };
+  if (!available.length) return { status: 'new', rows: [] };
+  claimedIds.add(Number(available[0].id));
+  return { status: 'duplicate', matchId: Number(available[0].id), rows: available };
+}
+
+module.exports = { reconcileCandidate, projectExternalTransaction, reconcileImportedChange, normalizeMerchant, formatCalendarDate, claimUniqueMatch };

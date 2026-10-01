@@ -85,6 +85,8 @@ test('exchanges a public token, encrypts access, and discovers all accounts unse
   const pool = scriptedPool([
     { rows: [{ id: 7 }] },
     { rows: [] },
+    { rows: [] },
+    { rows: [] },
     { rows: [{ id: 12 }] },
     { rows: [] },
     { rows: [] },
@@ -108,7 +110,7 @@ test('exchanges a public token, encrypts access, and discovers all accounts unse
 
 test('rejects selecting an account owned by another connection or cardholder', async () => {
   const { createConnectionService } = require('../plaid-connections');
-  const pool = scriptedPool([{ rows: [] }, { rows: [] }, { rows: [] }]);
+  const pool = scriptedPool([{ rows: [] }, { rows: [] }, { rows: [] }, { rows: [] }]);
   const service = createConnectionService({ pool, plaidClient: fakePlaid(), config });
   await assert.rejects(service.selectAccount(7, 12, 99), /Account not found/);
   assert.ok(pool.calls.some(call => call.sql === 'ROLLBACK'));
@@ -117,6 +119,7 @@ test('rejects selecting an account owned by another connection or cardholder', a
 test('selects exactly one credit-card account and activates the connection', async () => {
   const { createConnectionService } = require('../plaid-connections');
   const pool = scriptedPool([
+    { rows: [] },
     { rows: [] },
     { rows: [{ account_id: 22, account_type: 'credit', account_subtype: 'credit card' }] },
     { rows: [] },
@@ -135,7 +138,7 @@ test('selects exactly one credit-card account and activates the connection', asy
 
 test('rejects a non-credit account even when it belongs to the cardholder', async () => {
   const { createConnectionService } = require('../plaid-connections');
-  const pool = scriptedPool([{ rows: [] }, { rows: [{ account_id: 22, account_type: 'depository', account_subtype: 'checking' }] }, { rows: [] }, { rows: [] }]);
+  const pool = scriptedPool([{ rows: [] }, { rows: [] }, { rows: [{ account_id: 22, account_type: 'depository', account_subtype: 'checking' }] }, { rows: [] }]);
   const service = createConnectionService({ pool, plaidClient: fakePlaid(), config });
   await assert.rejects(service.selectAccount(7, 12, 22), /credit-card/);
 });
@@ -143,6 +146,7 @@ test('rejects a non-credit account even when it belongs to the cardholder', asyn
 test('rejects switching tracked accounts after a cursor has advanced', async () => {
   const { createConnectionService } = require('../plaid-connections');
   const pool = scriptedPool([
+    { rows: [] },
     { rows: [] },
     { rows: [{ account_id: 23, account_type: 'credit', account_subtype: 'credit card', sync_cursor: 'cursor-1', selected_account_id: 22 }] },
     { rows: [] },

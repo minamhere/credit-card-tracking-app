@@ -12,7 +12,8 @@ function createPlaidScheduler({
   let running = false;
   let stopped = true;
   let consecutiveFailures = 0;
-  let retryConnectionIds = null;
+  const failureCounts = new Map();
+  const cooldownCycles = new Map();
 
   function schedule(delay) {
     if (stopped || running) return;
@@ -24,12 +25,25 @@ function createPlaidScheduler({
     timer = null;
     running = true;
     try {
-      const outcomes = await syncService.syncAllHealthy(retryConnectionIds);
-      const failures = (outcomes || []).filter(outcome => !outcome.ok);
-      retryConnectionIds = failures.length ? failures.map(outcome => outcome.connectionId) : null;
-      consecutiveFailures = failures.length ? consecutiveFailures + 1 : 0;
+      const excluded = [];
+      for (const [connectionId, cycles] of cooldownCycles) {
+        if (cycles > 0) {
+          excluded.push(connectionId);
+          cooldownCycles.set(connectionId, cycles - 1);
+        } else cooldownCycles.delete(connectionId);
+      }
+      const outcomes = await syncService.syncAllHealthy({ excludeConnectionIds: excluded });
+      consecutiveFailures = 0;
       for (const outcome of outcomes || []) {
-        if (!outcome.ok) logger.error('Plaid connection sync failed', { connectionId: outcome.connectionId, code: outcome.code });
+        if (!outcome.ok) {
+          const count = (failureCounts.get(outcome.connectionId) || 0) + 1;
+          failureCounts.set(outcome.connectionId, count);
+          cooldownCycles.set(outcome.connectionId, Math.min((2 ** count) - 1, 7));
+          logger.error('Plaid connection sync failed', { connectionId: outcome.connectionId, code: outcome.code });
+        } else {
+          failureCounts.delete(outcome.connectionId);
+          cooldownCycles.delete(outcome.connectionId);
+        }
       }
     } catch (error) {
       consecutiveFailures++;

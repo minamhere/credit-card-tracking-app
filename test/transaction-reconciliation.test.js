@@ -79,3 +79,12 @@ test('decides whether provider changes may update an imported row', () => {
   assert.deepEqual(reconcileImportedChange(snapshot, { ...snapshot, merchant: 'My edited store' }), { status: 'conflicted' });
   assert.deepEqual(reconcileImportedChange(snapshot, snapshot, { removed: true }), { status: 'conflicted' });
 });
+
+test('allocates a cross-source match to only one repeated occurrence', () => {
+  const { claimUniqueMatch } = require('../transaction-reconciliation');
+  const claimed = new Set();
+  assert.deepEqual(claimUniqueMatch([{ id: 12 }], claimed).status, 'duplicate');
+  assert.deepEqual(claimUniqueMatch([{ id: 12 }], claimed).status, 'new');
+  assert.equal(claimed.has(12), true);
+  assert.equal(claimUniqueMatch([{ id: 13 }, { id: 14 }], claimed).status, 'ambiguous');
+});

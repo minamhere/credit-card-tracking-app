@@ -343,6 +343,12 @@ class DatabaseManager {
         return response.json();
     }
 
+    async resolvePlaidConflict(conflictId, action) {
+        const response = await fetch(`${this.baseUrl}/api/plaid/conflicts/${conflictId}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId: this.currentPersonId, action }) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Failed to resolve Plaid conflict');
+        return response.json();
+    }
+
     async createPlaidLinkToken(personId = this.currentPersonId) {
         const response = await fetch(`${this.baseUrl}/api/plaid/link-token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personId }) });
         if (!response.ok) throw new Error((await response.json()).error || 'Failed to start Citi connection');

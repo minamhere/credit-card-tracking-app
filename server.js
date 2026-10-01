@@ -13,7 +13,7 @@ const { createPlaidClient } = require('./plaid-client');
 const { createConnectionService } = require('./plaid-connections');
 const { createSyncService } = require('./plaid-sync');
 const { createPlaidScheduler } = require('./plaid-scheduler');
-const { projectExternalTransaction } = require('./transaction-reconciliation');
+const { projectExternalTransaction, claimUniqueMatch } = require('./transaction-reconciliation');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -784,11 +784,67 @@ app.get('/api/plaid/review', async (req, res) => {
         duplicate: false
       });
     }
-    const conflictResult = await pool.query(`SELECT COUNT(*) AS count FROM external_transactions et JOIN financial_connections c ON c.id = et.connection_id WHERE et.person_id = $1 AND c.environment = $2 AND et.lifecycle_status = 'conflicted'`, [personId, plaidConfig.environment]);
-    res.json({ transactions, conflictCount: Number(conflictResult.rows[0]?.count || 0) });
+    const conflictResult = await pool.query(`
+      SELECT et.*, t.date AS linked_date, t.amount AS linked_amount, t.merchant AS linked_merchant,
+             ae.event_date AS linked_event_date, ae.amount AS linked_event_amount,
+             ae.description AS linked_event_description
+      FROM external_transactions et
+      JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $2
+      LEFT JOIN transactions t ON t.id = et.linked_transaction_id
+      LEFT JOIN account_events ae ON ae.id = et.linked_account_event_id
+      WHERE et.person_id = $1 AND et.lifecycle_status = 'conflicted'
+      ORDER BY et.updated_at DESC
+    `, [personId, plaidConfig.environment]);
+    const conflicts = conflictResult.rows.map(row => ({
+      ...projectExternalTransaction(row),
+      conflictReason: row.conflict_reason || 'provider_modified',
+      linkedValue: row.linked_transaction_id ? { date: row.linked_date, amount: Number(row.linked_amount), merchant: row.linked_merchant }
+        : { date: row.linked_event_date, amount: Number(row.linked_event_amount), merchant: row.linked_event_description }
+    }));
+    res.json({ transactions, conflicts, conflictCount: conflicts.length });
   } catch (error) {
     plaidRouteError(res, error);
   }
+});
+
+app.post('/api/plaid/conflicts/:id/resolve', async (req, res) => {
+  if (!requirePlaid(res)) return;
+  const client = await pool.connect();
+  try {
+    const personId = positiveInteger(req.body.personId, 'personId');
+    const conflictId = positiveInteger(req.params.id, 'conflictId');
+    const action = req.body.action;
+    if (!['keep', 'update'].includes(action)) return res.status(400).json({ error: 'action must be keep or update' });
+    await client.query('BEGIN');
+    const result = await client.query(`
+      SELECT et.* FROM external_transactions et
+      JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $3
+      WHERE et.id = $1 AND et.person_id = $2 AND et.lifecycle_status = 'conflicted'
+      FOR UPDATE OF et
+    `, [conflictId, personId, plaidConfig.environment]);
+    if (!result.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Conflict not found.' }); }
+    const row = result.rows[0];
+    if (action === 'update' && row.conflict_reason === 'provider_removed') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'A removed provider record can only be kept; delete the local record manually if desired.' });
+    }
+    if (action === 'update' && row.linked_transaction_id) {
+      if (row.transaction_kind !== 'purchase') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Transaction kind changed; keep the local record and resolve manually.' }); }
+      await client.query('UPDATE transactions SET date = $1, amount = $2, merchant = $3, raw_merchant = $4 WHERE id = $5',
+        [projectExternalTransaction(row).date, Math.abs(Number(row.amount)), row.merchant_name || row.raw_description, row.raw_description, row.linked_transaction_id]);
+    } else if (action === 'update' && row.linked_account_event_id) {
+      if (row.transaction_kind === 'purchase') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Transaction kind changed; keep the local record and resolve manually.' }); }
+      await client.query('UPDATE account_events SET event_date = $1, amount = $2, description = $3, event_type = $4 WHERE id = $5',
+        [projectExternalTransaction(row).date, -Math.abs(Number(row.amount)), row.raw_description, row.transaction_kind, row.linked_account_event_id]);
+    }
+    await client.query("UPDATE external_transactions SET lifecycle_status = $1, conflict_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+      [action === 'keep' ? 'ignored' : 'imported', conflictId]);
+    await client.query('COMMIT');
+    res.json({ id: conflictId, resolution: action });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    plaidRouteError(res, error);
+  } finally { client.release(); }
 });
 
 app.post('/api/transaction-imports/preview', async (req, res) => {
@@ -804,6 +860,8 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
 
     const preview = [];
     const occurrences = new Map();
+    const claimedTransactionIds = new Set();
+    const claimedEventIds = new Set();
     for (const item of transactions) {
       const amount = Number(item.amount);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date || '') || !String(item.merchant || '').trim() || !Number.isFinite(amount)) {
@@ -815,16 +873,28 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
       occurrences.set(occurrenceKey, importOccurrence);
       const itemWithOccurrence = { ...item, importOccurrence };
       const hash = transactionHash(personId, itemWithOccurrence);
-      const duplicateResult = await pool.query(`
+      const transactionType = String(item.transactionType || 'purchase').toLowerCase();
+      const isPurchase = transactionType === 'purchase' && amount > 0;
+      const duplicateResult = isPurchase ? await pool.query(`
         SELECT id FROM transactions
-        WHERE person_id = $1 AND (
+        WHERE person_id = $1 AND transaction_type = $6 AND (
           source_hash = $2 OR
           (source = 'plaid' AND date::date BETWEEN $3::date - 3 AND $3::date + 3
             AND ABS(ABS(amount) - ABS($4)) < 0.001
             AND UPPER(TRIM(COALESCE(raw_merchant, merchant))) = $5) OR
           (source_hash IS NULL AND date = $3 AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
-        ) LIMIT 2
-      `, [personId, hash, item.date, amount, normalizeMerchant(item.merchant)]);
+        ) LIMIT 20
+      `, [personId, hash, item.date, amount, normalizeMerchant(item.merchant), transactionType]) : await pool.query(`
+        SELECT ae.id FROM account_events ae
+        JOIN import_batches ib ON ib.id = ae.import_batch_id
+        WHERE ae.person_id = $1 AND ae.event_date BETWEEN $2::date - 3 AND $2::date + 3
+          AND ABS(ABS(ae.amount) - ABS($3)) < 0.001 AND ae.event_type = $4
+          AND UPPER(TRIM(ae.description)) = $5
+        LIMIT 20
+      `, [personId, item.date, amount, transactionType, normalizeMerchant(item.merchant)]);
+      const claimed = isPurchase ? claimedTransactionIds : claimedEventIds;
+      const allocation = claimUniqueMatch(duplicateResult.rows, claimed);
+      const availableMatches = allocation.rows;
       const matchingRule = rulesResult.rows.find(rule => ruleMatches(rule, item.merchant));
       const defaultRule = matchingRule ? null : findDefaultMerchantRule(item.merchant);
       preview.push({
@@ -833,8 +903,10 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
         importOccurrence,
         originalMerchant: String(item.merchant).trim(),
         sourceHash: hash,
-        duplicate: duplicateResult.rows.length === 1,
-        ambiguous: duplicateResult.rows.length > 1,
+        duplicate: allocation.status === 'duplicate',
+        ambiguous: allocation.status === 'ambiguous',
+        reconciledTransactionId: isPurchase && availableMatches.length === 1 ? Number(availableMatches[0].id) : null,
+        reconciledEventId: !isPurchase && availableMatches.length === 1 ? Number(availableMatches[0].id) : null,
         invalid: false,
         categories: matchingRule ? matchingRule.categories : (defaultRule ? defaultRule.categories : []),
         merchant: matchingRule ? matchingRule.merchant_name : (defaultRule ? defaultRule.merchant : String(item.merchant).trim()),
@@ -867,6 +939,8 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
     let imported = 0;
     let eventsImported = 0;
     let skipped = 0;
+    const consumedTransactionIds = new Set((importMetadata.reconciledTransactionIds || []).map(Number));
+    const consumedEventIds = new Set((importMetadata.reconciledEventIds || []).map(Number));
     const importedEvents = [];
     for (const item of transactions) {
       let amount = Number(item.amount);
@@ -894,7 +968,7 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
           continue;
         }
         externalRow = externalResult.rows[0];
-        if (item.externalUpdatedAt && new Date(item.externalUpdatedAt).getTime() !== new Date(externalRow.updated_at).getTime()) {
+        if (!item.externalUpdatedAt || new Date(item.externalUpdatedAt).getTime() !== new Date(externalRow.updated_at).getTime()) {
           skipped++;
           continue;
         }
@@ -908,17 +982,28 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(transactionDate || '') || !merchant || !Number.isFinite(amount) || amount <= 0 || transactionType !== 'purchase') { skipped++; continue; }
       if (externalRow) {
         const crossSource = await client.query(`
-          SELECT t.id FROM transactions t
-          WHERE t.person_id = $1 AND t.source <> 'plaid'
+          SELECT t.id, t.source FROM transactions t
+          WHERE t.person_id = $1
             AND t.date::date BETWEEN $2::date - 3 AND $2::date + 3
             AND ABS(ABS(t.amount) - ABS($3)) < 0.001
             AND t.transaction_type = 'purchase'
             AND UPPER(TRIM(COALESCE(t.raw_merchant, t.merchant))) = $4
-            AND NOT EXISTS (SELECT 1 FROM external_transactions linked WHERE linked.linked_transaction_id = t.id)
+            AND (
+              (t.source <> 'plaid' AND NOT EXISTS (SELECT 1 FROM external_transactions linked WHERE linked.linked_transaction_id = t.id))
+              OR (t.source = 'plaid' AND EXISTS (
+                SELECT 1 FROM external_transactions old
+                WHERE old.linked_transaction_id = t.id AND old.connection_id = $5
+                  AND old.item_generation < $6
+              ))
+            )
           LIMIT 2
-        `, [personId, transactionDate, amount, normalizeMerchant(rawMerchant)]);
+        `, [personId, transactionDate, amount, normalizeMerchant(rawMerchant), externalRow.connection_id, externalRow.item_generation]);
         if (crossSource.rows.length === 1) {
-          await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [crossSource.rows[0].id, externalRow.id]);
+          if (crossSource.rows[0].source === 'plaid') {
+            await client.query(`UPDATE external_transactions SET lifecycle_status = 'ignored', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [externalRow.id]);
+          } else {
+            await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [crossSource.rows[0].id, externalRow.id]);
+          }
           skipped++;
           continue;
         }
@@ -926,17 +1011,18 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
       }
       const duplicate = await client.query(`
         SELECT id FROM transactions
-        WHERE person_id = $1 AND (
+        WHERE person_id = $1 AND transaction_type = $7 AND (
           source_hash = $2 OR
           ($6 = FALSE AND source = 'plaid' AND date::date BETWEEN $3::date - 3 AND $3::date + 3
             AND ABS(ABS(amount) - ABS($4)) < 0.001
             AND UPPER(TRIM(COALESCE(raw_merchant, merchant))) = $5) OR
           (source_hash IS NULL AND date = $3 AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
-        ) LIMIT 2
-      `, [personId, hash, transactionDate, amount, normalizeMerchant(rawMerchant), Boolean(externalRow)]);
-      if (duplicate.rows.length > 0) {
-        if (externalRow && duplicate.rows.length === 1) {
-          await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [duplicate.rows[0].id, externalRow.id]);
+        ) LIMIT 20
+      `, [personId, hash, transactionDate, amount, normalizeMerchant(rawMerchant), Boolean(externalRow), transactionType]);
+      const duplicateRows = externalRow ? duplicate.rows : duplicate.rows.filter(row => !consumedTransactionIds.has(Number(row.id)));
+      if (duplicateRows.length > 0) {
+        if (externalRow && duplicateRows.length === 1) {
+          await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [duplicateRows[0].id, externalRow.id]);
         }
         skipped++;
         continue;
@@ -991,7 +1077,7 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
           continue;
         }
         externalRow = externalResult.rows[0];
-        if (item.externalUpdatedAt && new Date(item.externalUpdatedAt).getTime() !== new Date(externalRow.updated_at).getTime()) { skipped++; continue; }
+        if (!item.externalUpdatedAt || new Date(item.externalUpdatedAt).getTime() !== new Date(externalRow.updated_at).getTime()) { skipped++; continue; }
         eventDate = projectExternalTransaction(externalRow).date;
         amount = -Math.abs(Number(externalRow.amount));
         description = externalRow.raw_description;
@@ -1000,6 +1086,22 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
         if (eventType === 'purchase') { skipped++; continue; }
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate || '') || !description || !Number.isFinite(amount)) { skipped++; continue; }
+      const eventMatches = await client.query(`
+        SELECT ae.id FROM account_events ae
+        JOIN import_batches ib ON ib.id = ae.import_batch_id
+        WHERE ae.person_id = $1 AND ae.event_date BETWEEN $2::date - 3 AND $2::date + 3
+          AND ABS(ABS(ae.amount) - ABS($3)) < 0.001 AND ae.event_type = $4
+          AND UPPER(TRIM(ae.description)) = $5
+          AND ($6 = FALSE OR ib.source <> 'plaid')
+        LIMIT 20
+      `, [personId, eventDate, amount, eventType, normalizeMerchant(description), Boolean(externalRow)]);
+      const availableEvents = externalRow ? eventMatches.rows : eventMatches.rows.filter(row => !consumedEventIds.has(Number(row.id)));
+      if (availableEvents.length === 1) {
+        if (externalRow) await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_account_event_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [availableEvents[0].id, externalRow.id]);
+        skipped++;
+        continue;
+      }
+      if (availableEvents.length > 1) { skipped++; continue; }
       const result = await client.query(`
         INSERT INTO account_events
           (person_id, import_batch_id, event_date, amount, description, event_type, source_hash)

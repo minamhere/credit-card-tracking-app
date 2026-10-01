@@ -98,7 +98,17 @@ function createConnectionService({ pool, plaidClient, config }) {
       ]);
       const encrypted = encryptAccessToken(exchange.accessToken, config.tokenEncryptionKey, config.environment);
 
-      return withTransaction(async client => {
+      try {
+        return await withTransaction(async client => {
+        await client.query('SELECT pg_advisory_xact_lock($1)', [-personId]);
+        const current = await client.query(`
+          SELECT status FROM financial_connections
+          WHERE person_id = $1 AND provider = 'plaid' AND environment = $2
+          FOR UPDATE
+        `, [personId, config.environment]);
+        if (current.rows.length && current.rows[0].status !== 'disconnected') {
+          throw new Error('This cardholder already has a Plaid connection.');
+        }
         const connectionResult = await client.query(`
           INSERT INTO financial_connections
             (person_id, provider_item_id, environment, access_token_ciphertext,
@@ -112,10 +122,11 @@ function createConnectionService({ pool, plaidClient, config }) {
             access_token_auth_tag = EXCLUDED.access_token_auth_tag,
             access_token_key_version = EXCLUDED.access_token_key_version,
             consent_expiration_at = EXCLUDED.consent_expiration_at,
+            item_generation = financial_connections.item_generation + 1,
             sync_cursor = NULL,
             status = 'account_selection',
             updated_at = CURRENT_TIMESTAMP
-          RETURNING id
+          RETURNING id, item_generation
         `, [personId, exchange.itemId, config.environment, encrypted.ciphertext, encrypted.nonce,
           encrypted.authTag, encrypted.keyVersion, item.consentExpirationTime]);
         const connectionId = connectionResult.rows[0].id;
@@ -152,11 +163,16 @@ function createConnectionService({ pool, plaidClient, config }) {
           });
         }
         return { connection: { id: connectionId, status: 'account_selection', environment: config.environment }, accounts: discovered };
-      });
+        });
+      } catch (error) {
+        try { await plaidClient.removeItem(exchange.accessToken); } catch { /* preserve the original persistence error */ }
+        throw error;
+      }
     },
 
     async selectAccount(personId, connectionId, accountId) {
       return withTransaction(async client => {
+        await client.query('SELECT pg_advisory_xact_lock($1)', [connectionId]);
         const result = await client.query(`
           SELECT a.id AS account_id, a.account_type, a.account_subtype, c.sync_cursor,
                  selected.id AS selected_account_id
@@ -165,7 +181,7 @@ function createConnectionService({ pool, plaidClient, config }) {
           LEFT JOIN financial_accounts selected ON selected.connection_id = c.id AND selected.selected = TRUE
           WHERE a.id = $1 AND c.id = $2 AND c.person_id = $3 AND c.environment = $4
             AND c.status <> 'disconnected' AND a.available = TRUE
-          FOR UPDATE
+          FOR UPDATE OF a, c
         `, [accountId, connectionId, personId, config.environment]);
         if (!result.rows.length) throw new Error('Account not found for this cardholder connection.');
         const account = result.rows[0];
@@ -235,6 +251,7 @@ function createConnectionService({ pool, plaidClient, config }) {
         personId: row.person_id,
         financialAccountId: row.financial_account_id,
         providerAccountId: row.provider_account_id,
+        itemGeneration: row.item_generation,
         cursor: row.sync_cursor,
         accessToken: decryptAccessToken(encryptedRecord(row), config.tokenEncryptionKey, config.environment)
       };
