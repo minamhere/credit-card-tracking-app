@@ -834,6 +834,12 @@ app.post('/api/plaid/conflicts/:id/resolve', async (req, res) => {
         [projectExternalTransaction(row).date, Math.abs(Number(row.amount)), row.merchant_name || row.raw_description, row.raw_description, row.linked_transaction_id]);
     } else if (action === 'update' && row.linked_account_event_id) {
       if (row.transaction_kind === 'purchase') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Transaction kind changed; keep the local record and resolve manually.' }); }
+      const assigned = await client.query('SELECT assigned_offer_credit_id FROM account_events WHERE id = $1 FOR UPDATE', [row.linked_account_event_id]);
+      const revisedEvent = { amount: -Math.abs(Number(row.amount)), description: row.raw_description, eventType: row.transaction_kind };
+      if (assigned.rows[0]?.assigned_offer_credit_id && !CreditMatcher.isPotentialOfferCredit(revisedEvent)) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'This change would turn an assigned offer credit into a non-credit event. Unassign it before applying the provider update.' });
+      }
       await client.query('UPDATE account_events SET event_date = $1, amount = $2, description = $3, event_type = $4 WHERE id = $5',
         [projectExternalTransaction(row).date, -Math.abs(Number(row.amount)), row.raw_description, row.transaction_kind, row.linked_account_event_id]);
       await client.query(`
@@ -1008,7 +1014,8 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
         `, [personId, transactionDate, amount, normalizeMerchant(rawMerchant), externalRow.connection_id, externalRow.item_generation, externalRow.financial_account_id]);
         if (crossSource.rows.length === 1) {
           if (crossSource.rows[0].old_external_id) {
-            await client.query(`UPDATE external_transactions SET lifecycle_status = 'ignored', supersedes_external_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [crossSource.rows[0].old_external_id, externalRow.id]);
+            await client.query('UPDATE external_transactions SET linked_transaction_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [crossSource.rows[0].old_external_id]);
+            await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, supersedes_external_transaction_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`, [crossSource.rows[0].id, crossSource.rows[0].old_external_id, externalRow.id]);
           } else {
             await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [crossSource.rows[0].id, externalRow.id]);
           }
@@ -1119,7 +1126,8 @@ app.post('/api/transaction-imports/confirm', async (req, res) => {
       const availableEvents = externalRow ? eventMatches.rows : eventMatches.rows.filter(row => !consumedEventIds.has(Number(row.id)));
       if (availableEvents.length === 1) {
         if (externalRow && availableEvents[0].old_external_id) {
-          await client.query(`UPDATE external_transactions SET lifecycle_status = 'ignored', supersedes_external_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [availableEvents[0].old_external_id, externalRow.id]);
+          await client.query('UPDATE external_transactions SET linked_account_event_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [availableEvents[0].old_external_id]);
+          await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_account_event_id = $1, supersedes_external_transaction_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`, [availableEvents[0].id, availableEvents[0].old_external_id, externalRow.id]);
         } else if (externalRow) {
           await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_account_event_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [availableEvents[0].id, externalRow.id]);
         }
