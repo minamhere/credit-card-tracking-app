@@ -1666,7 +1666,8 @@ class OfferTracker {
                     </div>
                 ` : '';
 
-                const todayText = new Date().toISOString().slice(0, 10);
+                const dashboardToday = new Date();
+                const todayText = `${MonthlyDashboard.localMonth(dashboardToday)}-${String(dashboardToday.getDate()).padStart(2, '0')}`;
                 const focusPeriod = offer.monthlyTracking && progress.months
                     ? (progress.months.find(month => month.periodStart <= todayText && month.periodEnd >= todayText)
                         || progress.months.find(month => month.periodStart > todayText)
@@ -1746,19 +1747,20 @@ class OfferTracker {
                             <div class="dashboard-action-title">${actionTitle}</div>
                             <div class="dashboard-action-detail">${this.escapeHtml(actionDetail)}</div>
                         </div>
-                        <div class="dashboard-metrics">
+                        ${offer.monthlyTracking ? MonthlyDashboard.renderMonthlyDashboard(offer, progress, value => this.escapeHtml(value), dashboardToday, CreditMatcher) : `<div class="dashboard-metrics">
                             <div><span>Qualifying spend</span><strong>$${focusSpend.toFixed(2)}</strong></div>
                             <div><span>Expected credit</span><strong>$${Number(progress.expectedReward ?? earned).toFixed(2)}</strong></div>
                             <div><span>Posted credit</span><strong>$${Number(progress.postedCredits || 0).toFixed(2)}</strong></div>
                         </div>
-                        ${postedCreditsHtml}
-                        ${reconciliationHtml}
+                        ${postedCreditsHtml}`}
+                        ${offer.monthlyTracking ? '' : reconciliationHtml}
                         <details class="dashboard-details">
-                            <summary>Progress history and offer details</summary>
+                            <summary>${offer.monthlyTracking ? 'Offer-wide totals, reconciliation and terms' : 'Progress and offer details'}</summary>
                             <p>${this.escapeHtml(offer.description || '')}</p>
-                            ${offer.monthlyTracking ? this.renderMonthlyProgress(offer, progress) : this.renderSingleProgress(offer, progress)}
+                            ${offer.monthlyTracking ? `<p>Expected across all months: $${Number(progress.expectedReward || 0).toFixed(2)} · Posted across all months: $${Number(progress.postedCredits || 0).toFixed(2)}</p>` : this.renderSingleProgress(offer, progress)}
+                            ${offer.monthlyTracking ? reconciliationHtml : ''}
                         </details>
-                        ${transactionsHtml}
+                        ${offer.monthlyTracking ? '' : transactionsHtml}
                         ${saturatedTransactionsHtml}
                         <div class="dashboard-card-actions">
                             <button class="btn-secondary" onclick="tracker.recordOfferCredit(${offer.id})">Record statement credit</button>
@@ -2422,6 +2424,16 @@ class OfferTracker {
                 </div>
             </div>
         `;
+    }
+
+    async assignCreditMonth(offerId, creditId, rewardMonth) {
+        try {
+            await this.dataManager.dbManager.assignCreditMonth(offerId, creditId, rewardMonth);
+            await this.renderDashboard();
+        } catch (error) {
+            alert(error.message || 'Unable to assign credit month.');
+            await this.renderDashboard();
+        }
     }
 
     async recordOfferCredit(offerId) {

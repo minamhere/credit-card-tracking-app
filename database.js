@@ -239,6 +239,15 @@ class DatabaseManager {
         return response.json();
     }
 
+    async assignCreditMonth(offerId, creditId, rewardMonth) {
+        const response = await fetch(`${this.baseUrl}/api/offers/${offerId}/credits/${creditId}/month`, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personId: this.currentPersonId, rewardMonth: rewardMonth || null })
+        });
+        if (!response.ok) throw new Error((await response.json()).error || 'Unable to assign credit month');
+        return response.json();
+    }
+
     // Transactions methods
     async getTransactions() {
         try {

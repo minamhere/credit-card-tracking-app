@@ -206,7 +206,7 @@ async function autoMatchOfferCredits(client, personId, events) {
   }));
   const creditsByOffer = new Map(offerIds.map(id => [id, []]));
   creditsResult.rows.forEach(row => creditsByOffer.get(row.offer_id).push({
-    id: row.id, amount: Number(row.amount), postedDate: row.posted_date, description: row.description
+    id: row.id, amount: Number(row.amount), postedDate: row.posted_date, description: row.description, rewardMonth: row.reward_month || null
   }));
 
   const matches = [];
@@ -422,7 +422,7 @@ app.get('/api/offers', async (req, res) => {
     ) : { rows: [] };
     const offers = result.rows.map(row => serializeOffer(row, creditsResult.rows
       .filter(credit => credit.offer_id === row.id)
-      .map(credit => ({ id: credit.id, amount: Number(credit.amount), postedDate: credit.posted_date, description: credit.description }))));
+      .map(credit => ({ id: credit.id, amount: Number(credit.amount), postedDate: credit.posted_date, description: credit.description, rewardMonth: credit.reward_month || null }))));
     res.json(offers);
   } catch (err) {
     console.error('Error fetching offers:', err);
@@ -598,6 +598,7 @@ app.get('/api/offers/:id', async (req, res) => {
       id: credit.id,
       amount: Number(credit.amount),
       postedDate: credit.posted_date,
+      rewardMonth: credit.reward_month || null,
       description: credit.description
     })));
 
@@ -605,6 +606,28 @@ app.get('/api/offers/:id', async (req, res) => {
   } catch (err) {
     console.error('Error fetching offer:', err);
     res.status(500).json({ error: 'Failed to fetch offer' });
+  }
+});
+
+app.patch('/api/offers/:offerId/credits/:creditId/month', async (req, res) => {
+  try {
+    const personId = positiveInteger(req.body.personId, 'personId');
+    const rewardMonth = req.body.rewardMonth || null;
+    const offerResult = await pool.query('SELECT * FROM offers WHERE id = $1 AND person_id = $2',
+      [positiveInteger(req.params.offerId, 'offerId'), personId]);
+    if (!offerResult.rows.length) return res.status(404).json({ error: 'Offer not found for this cardholder.' });
+    const offer = offerResult.rows[0];
+    if (rewardMonth && (!offer.monthly_tracking || !/^\d{4}-(0[1-9]|1[0-2])$/.test(rewardMonth) ||
+        rewardMonth < String(offer.start_date).slice(0, 7) || rewardMonth > String(offer.end_date).slice(0, 7))) {
+      return res.status(400).json({ error: 'Choose an earned month within this monthly offer.' });
+    }
+    const result = await pool.query('UPDATE offer_credits SET reward_month = $1 WHERE id = $2 AND offer_id = $3 RETURNING id',
+      [rewardMonth, positiveInteger(req.params.creditId, 'creditId'), offer.id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Offer credit not found.' });
+    res.json({ id: result.rows[0].id, rewardMonth });
+  } catch (error) {
+    console.error('Error assigning credit month:', error);
+    res.status(400).json({ error: 'Unable to assign the earned month.' });
   }
 });
 

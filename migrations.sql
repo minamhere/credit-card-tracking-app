@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS offer_credits (
     source_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE offer_credits ADD COLUMN IF NOT EXISTS reward_month TEXT;
 
 CREATE TABLE IF NOT EXISTS import_batches (
     id SERIAL PRIMARY KEY,

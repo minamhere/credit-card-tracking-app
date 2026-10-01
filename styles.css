@@ -477,6 +477,20 @@ button:hover {
 .posted-credit-amount { color: #287d3c; font-size: 1rem; font-weight: 700; }
 .posted-credit-row small { display: block; margin-top: 0.15rem; color: var(--text-secondary); }
 .posted-credit-empty { padding: 0.65rem 0.7rem; color: var(--text-secondary); font-size: 0.82rem; }
+.monthly-period { padding: 0.85rem; margin-top: 0.65rem; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary); }
+.monthly-period-current { border: 2px solid var(--button-primary); background: var(--bg-secondary); }
+.monthly-period-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.6rem; align-items: baseline; margin-bottom: 0.65rem; }
+.monthly-period-heading h3 { margin: 0; font-size: 1rem; color: var(--text-primary); }
+.monthly-period-current h3 { font-size: 1.15rem; }
+.monthly-period-heading > span { color: var(--text-secondary); font-size: 0.78rem; }
+.monthly-progress, .monthly-progress .progress-bar { height: 8px; }
+.monthly-tier-labels { display: flex; gap: 0.5rem 1rem; flex-wrap: wrap; margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.8rem; }
+.monthly-next-target, .monthly-credit-help { color: var(--text-secondary); font-size: 0.82rem; margin: 0.55rem 0; }
+.monthly-unassigned .monthly-credit-help { padding: 0 0.7rem; }
+.monthly-history > summary { padding: 0.3rem 0; font-size: 0.9rem; color: var(--text-primary); }
+.credit-month-label { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin-top: 0.45rem; color: var(--text-secondary); font-size: 0.78rem; }
+.credit-month-label select { max-width: 100%; padding: 0.25rem; color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; }
+.monthly-dashboard .posted-credit-row > div { min-width: 0; overflow-wrap: anywhere; }
 .dashboard-credit-transaction { padding: 0.35rem 0; border-bottom: 1px solid var(--border-color); }
 .dashboard-credit-transaction small { display: block; margin-top: 0.12rem; color: #6f42c1; }
 .dashboard-maxed-details summary { color: var(--text-secondary); font-style: italic; }
