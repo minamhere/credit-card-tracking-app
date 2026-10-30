@@ -5,7 +5,7 @@ A web application to track credit card spending offers and bonus qualifications 
 ## Features
 
 - **Citi CSV transaction import** with a review step before anything is saved
-- **Optional Plaid Citi sync** with encrypted credentials, per-cardholder connections, review-before-import, and resilient scheduled updates
+- **Optional Plaid Citi sync** with encrypted credentials, per-cardholder connections, automatic review of recognized purchases, an uncertainty queue, and resilient scheduled updates
 - **Duplicate protection** based on card holder, date, amount, and Citi merchant description
 - **Merchant category rules** that automatically classify future purchases into one or more bonus categories
 - **Shared Citi merchant mappings** for known grocery, gas, restaurant, retail, entertainment, and transportation merchants
@@ -115,7 +115,7 @@ Offer reminders are linked to an existing offer when their normalized terms matc
 
 ### Citi Transactions with Plaid
 
-Plaid can retrieve transactions for one selected Citi credit card under each cardholder. Connections, review queues, and sync failures remain independent. Access tokens are encrypted in PostgreSQL, pending transactions stay staged, and imports require review before they affect offer tracking.
+Plaid can retrieve transactions for one selected Citi credit card under each cardholder. Connections, review queues, and sync failures remain independent. Access tokens are encrypted in PostgreSQL, pending transactions stay staged, recognized purchases import automatically, and uncertain items remain for review. Set `TRANSACTION_AUTO_REVIEW=false` to keep all purchase imports manual. See [Automatic review](docs/AUTOMATIC-REVIEW.md) for merchant learning and credit evidence.
 
 The Synology deployment needs outbound HTTPS but no public inbound access, webhook, or public domain. Start in Sandbox with automatic sync disabled. See [Plaid Operations](docs/PLAID-OPERATIONS.md) for key generation, validation, Production rollout, reconnect, disconnect, rollback, and CSV fallback.
 

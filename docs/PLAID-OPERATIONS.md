@@ -37,7 +37,7 @@ The log should show migrations completing and the server starting. Incomplete cr
 
 ## 2. Sandbox acceptance test
 
-Keep automatic sync disabled during this test.
+Keep automatic sync disabled during this test. Set `TRANSACTION_AUTO_REVIEW=false` while testing the manual import workflow. Test automatic review separately using [its acceptance checks](AUTOMATIC-REVIEW.md).
 
 1. Open the app at its private LAN address and select the first cardholder.
 2. In Transactions, choose **Connect Citi** and complete Plaid Link with a Sandbox institution/user.
@@ -72,7 +72,7 @@ The two connections are independent. A failure on one must not prevent the other
 ## 4. Routine operation and recovery
 
 - New Citi connections request 60 days of initial history. The initial import boundary is fixed when the connection is created; subsequent cursor-based syncs retrieve all new changes, even after a long gap. It is not a rolling 60-day filter.
-- Purchases, payments, credits, and other account events start unselected in review. Check only the rows you want; unselected rows are not imported. Merchant-rule saving also requires an explicit check.
+- Recognized posted purchases and account events are handled after sync when `TRANSACTION_AUTO_REVIEW=true` (the default). Uncertain records stay in review. Rows remaining in manual review start unselected; check only the rows you want. Merchant-rule saving always requires an explicit check. See [Automatic review](AUTOMATIC-REVIEW.md) for evidence, learning, and retries.
 - On upgrading an existing connection, staged history older than 60 days before its original connection date is hidden from review and its count. No staged or imported data is deleted, the sync cursor is preserved, and reconnecting is not necessary. Previously imported records remain unchanged and provider conflicts remain visible.
 - Use **Sync now** for an immediate refresh. Normal automatic sync uses chained, non-overlapping runs.
 - A transient provider or rate-limit error is retried on a later scheduled run. Do not repeatedly click Sync.

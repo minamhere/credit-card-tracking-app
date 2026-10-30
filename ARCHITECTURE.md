@@ -25,6 +25,14 @@ Legacy offer columns remain during migration and are translated by `offer-engine
 
 An import preserves the original Citi merchant string, transaction type, source, and stable duplicate fingerprint. The normalized merchant and category assignments drive offer eligibility. Merchant rules are shared by every card holder and can be corrected without changing the raw source.
 
+## Automatic review and evidence
+
+`merchant-classifier.js` is shared by previews and automatic processing. `transaction-import-service.js` preserves hashes, raw source, lifecycle checks, and cross-source reconciliation for both manual and automatic imports. `transaction-review-service.js` selects only eligible current-account/current-generation rows after a committed Plaid sync.
+
+`credit-matcher.js` plans period-aware assignments; `credit-review-service.js` persists their earned month and versioned JSON evidence. Percentage allocations share purchase/day budgets; fixed and tiered rewards use period/checkpoint budgets. Unknown legacy evidence is reserved conservatively. `reviewed-edit-service.js` preserves manual corrections and flags affected historical evidence before retrying queued review.
+
+All import/assignment/edit services serialize financial changes using `review-lock.js` and PostgreSQL transaction advisory lock `(72601, personId)` before row locks. Automatic-review failures are separate from successful provider syncs. The browser reads decisions and explanations; rendering the dashboard does not assign credits. See [Automatic review operations](docs/AUTOMATIC-REVIEW.md).
+
 ## Future Microsoft 365 ingestion
 
 Microsoft Graph OAuth should be implemented as a server-side integration with the minimum mail permissions required. Refresh tokens must be encrypted and must never reach the browser.
