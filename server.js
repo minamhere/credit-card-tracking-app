@@ -7,6 +7,9 @@ const crypto = require('crypto');
 const OfferEngine = require('./offer-engine');
 const OfferEmailParser = require('./offer-email-parser');
 const CreditMatcher = require('./credit-matcher');
+const { createCreditReviewService } = require('./credit-review-service');
+const { createTransactionImportService } = require('./transaction-import-service');
+const { withPersonLock } = require('./review-lock');
 const { classifyMerchant } = require('./merchant-classifier');
 const M365 = require('./m365');
 const { loadPlaidConfig } = require('./plaid-config');
@@ -159,60 +162,8 @@ async function findDuplicateOffer(personId, fingerprint) {
   return existing.rows.find(row => fingerprintForStoredOffer(row) === fingerprint) || null;
 }
 
-async function autoMatchOfferCredits(client, personId, events) {
-  if (!events.length) return [];
-  const offersResult = await client.query('SELECT * FROM offers WHERE person_id = $1', [personId]);
-  if (!offersResult.rows.length) return [];
-  const offerIds = offersResult.rows.map(row => row.id);
-  const transactionsResult = await client.query('SELECT * FROM transactions WHERE person_id = $1 ORDER BY date, id', [personId]);
-  const creditsResult = await client.query('SELECT * FROM offer_credits WHERE offer_id = ANY($1::int[]) ORDER BY posted_date, id', [offerIds]);
-  const transactions = transactionsResult.rows.map(row => ({
-    id: row.id,
-    date: row.date,
-    amount: Number(row.amount),
-    merchant: row.merchant,
-    categories: row.categories || [],
-    transactionType: row.transaction_type || 'purchase'
-  }));
-  const creditsByOffer = new Map(offerIds.map(id => [id, []]));
-  creditsResult.rows.forEach(row => creditsByOffer.get(row.offer_id).push({
-    id: row.id, amount: Number(row.amount), postedDate: row.posted_date, description: row.description, rewardMonth: row.reward_month || null
-  }));
-
-  const matches = [];
-  let pendingEvents = [...events].sort((a, b) => Number(a.id) - Number(b.id));
-  let matchedThisPass = 0;
-  do {
-    matchedThisPass = 0;
-    const stillPending = [];
-    for (const event of pendingEvents) {
-      const eventDate = String(event.date).slice(0, 10);
-      const candidates = offersResult.rows.map(row => {
-        const offer = serializeOffer(row, creditsByOffer.get(row.id));
-        const progress = OfferEngine.calculateOfferProgress(offer, transactions, { asOf: new Date().toISOString().slice(0, 10) });
-        return { offer, progress };
-      });
-      const match = CreditMatcher.findCreditMatch(event, candidates);
-      if (!match.matched) {
-        stillPending.push(event);
-        continue;
-      }
-
-      const amount = Math.abs(Number(event.amount));
-      const creditResult = await client.query(`
-        INSERT INTO offer_credits (offer_id, amount, posted_date, description)
-        VALUES ($1, $2, $3, $4)
-        RETURNING *
-      `, [match.offerId, amount, eventDate, event.description]);
-      await client.query('UPDATE account_events SET assigned_offer_credit_id = $1 WHERE id = $2', [creditResult.rows[0].id, event.id]);
-      creditsByOffer.get(match.offerId).push({ id: creditResult.rows[0].id, amount, postedDate: eventDate, description: event.description });
-      matches.push({ eventId: event.id, amount, offerId: match.offerId, offerName: match.offerName, reasons: match.reasons });
-      matchedThisPass++;
-    }
-    pendingEvents = stillPending;
-  } while (matchedThisPass > 0 && pendingEvents.length > 0);
-  return matches;
-}
+const creditReview = createCreditReviewService({ serializeOffer });
+const transactionImport = createTransactionImportService({ pool, creditReview, environment: plaidConfig.environment });
 
 // Run migrations on startup
 async function runMigrations() {
@@ -940,239 +891,9 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
   }
 });
 
-app.post('/api/transaction-imports/confirm', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { personId, transactions, importMetadata = {}, accountEvents = [] } = req.body;
-    if (!personId || !Array.isArray(transactions) || !Array.isArray(accountEvents) || transactions.length + accountEvents.length > 2000) {
-      return res.status(400).json({ error: 'A card holder and up to 2,000 transactions are required.' });
-    }
-
-    await client.query('BEGIN');
-    const batchResult = await client.query(`
-      INSERT INTO import_batches (person_id, source, filename, file_hash, record_count)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id
-    `, [personId, importMetadata.source || 'citi_csv', importMetadata.filename || null,
-        importMetadata.fileHash || null, importMetadata.recordCount || transactions.length + accountEvents.length]);
-    const importBatchId = batchResult.rows[0].id;
-    let imported = 0;
-    let eventsImported = 0;
-    let skipped = 0;
-    const consumedTransactionIds = new Set((importMetadata.reconciledTransactionIds || []).map(Number));
-    const consumedEventIds = new Set((importMetadata.reconciledEventIds || []).map(Number));
-    const importedEvents = [];
-    for (const item of transactions) {
-      let amount = Number(item.amount);
-      const merchant = String(item.merchant || '').trim();
-      let transactionType = String(item.transactionType || 'purchase').toLowerCase();
-      let transactionDate = item.date;
-      let rawMerchant = item.originalMerchant || merchant;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date || '') || !merchant || !Number.isFinite(amount) || amount <= 0 || transactionType !== 'purchase') {
-        skipped++;
-        continue;
-      }
-      let hash = transactionHash(personId, item);
-      let externalRow = null;
-      if (item.externalTransactionId != null) {
-        const externalResult = await client.query(`
-          SELECT et.* FROM external_transactions et
-          JOIN financial_accounts a ON a.id = et.financial_account_id AND a.selected = TRUE
-          JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $3
-          WHERE et.id = $1 AND et.person_id = $2 AND et.pending = FALSE
-            AND et.lifecycle_status = 'awaiting_review'
-            AND et.transaction_date >= c.import_start_date
-          FOR UPDATE OF et
-        `, [positiveInteger(item.externalTransactionId, 'externalTransactionId'), personId, plaidConfig.environment]);
-        if (!externalResult.rows.length) {
-          skipped++;
-          continue;
-        }
-        externalRow = externalResult.rows[0];
-        if (!item.externalUpdatedAt || new Date(item.externalUpdatedAt).getTime() !== new Date(externalRow.updated_at).getTime()) {
-          skipped++;
-          continue;
-        }
-        transactionDate = projectExternalTransaction(externalRow).date;
-        amount = Math.abs(Number(externalRow.amount));
-        transactionType = externalRow.transaction_kind;
-        rawMerchant = externalRow.raw_description;
-        hash = providerTransactionHash(personId, externalRow.provider_transaction_id);
-        if (transactionType !== 'purchase') { skipped++; continue; }
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(transactionDate || '') || !merchant || !Number.isFinite(amount) || amount <= 0 || transactionType !== 'purchase') { skipped++; continue; }
-      if (externalRow) {
-        const crossSource = { rows: await findPurchaseMatches(client, {
-          personId, date: transactionDate, amount, merchant, rawMerchant, external: true,
-          connectionId: externalRow.connection_id, itemGeneration: externalRow.item_generation, accountId: externalRow.financial_account_id
-        }, { lock: true }) };
-        if (crossSource.rows.length === 1) {
-          if (crossSource.rows[0].old_external_id) {
-            await client.query('UPDATE external_transactions SET linked_transaction_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [crossSource.rows[0].old_external_id]);
-            await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, supersedes_external_transaction_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`, [crossSource.rows[0].id, crossSource.rows[0].old_external_id, externalRow.id]);
-          } else {
-            await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [crossSource.rows[0].id, externalRow.id]);
-          }
-          skipped++;
-          continue;
-        }
-        if (crossSource.rows.length > 1) { skipped++; continue; }
-      }
-      const duplicate = await client.query(`
-        SELECT id FROM transactions
-        WHERE person_id = $1 AND transaction_type = $7 AND (
-          source_hash = $2 OR
-          ($6 = FALSE AND source = 'plaid' AND date::date BETWEEN $3::date - 3 AND $3::date + 3
-            AND ABS(ABS(amount) - ABS($4)) < 0.001
-            AND UPPER(TRIM(COALESCE(raw_merchant, merchant))) = $5) OR
-          (source_hash IS NULL AND date::date = $3::date AND ABS(amount - $4) < 0.001 AND UPPER(TRIM(merchant)) = $5)
-        ) LIMIT 20
-      `, [personId, hash, transactionDate, amount, normalizeMerchant(rawMerchant), Boolean(externalRow), transactionType]);
-      const duplicateRows = externalRow ? duplicate.rows : duplicate.rows.filter(row => !consumedTransactionIds.has(Number(row.id)));
-      if (!externalRow) {
-        const matches = await findPurchaseMatches(client, {
-          personId, date: transactionDate, amount, merchant, rawMerchant, external: false
-        }, { lock: true });
-        for (const match of matches) {
-          if (!consumedTransactionIds.has(Number(match.id)) && !duplicateRows.some(row => Number(row.id) === Number(match.id))) duplicateRows.push(match);
-        }
-      }
-      if (duplicateRows.length > 0) {
-        if (externalRow && duplicateRows.length === 1) {
-          await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [duplicateRows[0].id, externalRow.id]);
-        }
-        if (!externalRow && duplicateRows.length === 1) consumedTransactionIds.add(Number(duplicateRows[0].id));
-        skipped++;
-        continue;
-      }
-
-      const categories = Array.isArray(item.categories)
-        ? [...new Set(item.categories.map(value => String(value).trim().toLowerCase()).filter(Boolean))]
-        : [];
-      const insertedTransaction = await client.query(`
-        INSERT INTO transactions
-          (date, amount, merchant, categories, description, person_id, source, source_hash, raw_merchant, transaction_type, import_batch_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        RETURNING id
-      `, [transactionDate, amount, merchant, categories, item.description || '', personId,
-          externalRow ? 'plaid' : 'citi_csv', hash, rawMerchant, transactionType, importBatchId]);
-      if (externalRow) {
-        await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_transaction_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [insertedTransaction.rows[0].id, externalRow.id]);
-      }
-      imported++;
-
-      if (item.saveRule && categories.length > 0) {
-        const pattern = normalizeMerchant(item.rulePattern || item.originalMerchant || merchant);
-        await client.query(`
-          INSERT INTO merchant_category_rules
-            (merchant_pattern, merchant_name, match_type, categories)
-          VALUES ($1, $2, 'contains', $3)
-          ON CONFLICT (merchant_pattern, match_type)
-          DO UPDATE SET merchant_name = EXCLUDED.merchant_name,
-                        categories = EXCLUDED.categories,
-                        updated_at = CURRENT_TIMESTAMP
-        `, [pattern, merchant, categories]);
-      }
-    }
-    for (const item of accountEvents) {
-      let amount = Number(item.amount);
-      let description = String(item.originalMerchant || item.merchant || '').trim();
-      let eventType = String(item.transactionType || item.description || 'account event').toLowerCase();
-      let eventDate = item.date;
-      let hash = transactionHash(personId, item);
-      let externalRow = null;
-      if (item.externalTransactionId != null) {
-        const externalResult = await client.query(`
-          SELECT et.* FROM external_transactions et
-          JOIN financial_accounts a ON a.id = et.financial_account_id AND a.selected = TRUE
-          JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $3
-          WHERE et.id = $1 AND et.person_id = $2 AND et.pending = FALSE
-            AND et.lifecycle_status = 'awaiting_review'
-            AND et.transaction_date >= c.import_start_date
-          FOR UPDATE OF et
-        `, [positiveInteger(item.externalTransactionId, 'externalTransactionId'), personId, plaidConfig.environment]);
-        if (!externalResult.rows.length) {
-          skipped++;
-          continue;
-        }
-        externalRow = externalResult.rows[0];
-        if (!item.externalUpdatedAt || new Date(item.externalUpdatedAt).getTime() !== new Date(externalRow.updated_at).getTime()) { skipped++; continue; }
-        eventDate = projectExternalTransaction(externalRow).date;
-        amount = -Math.abs(Number(externalRow.amount));
-        description = externalRow.raw_description;
-        eventType = externalRow.transaction_kind;
-        hash = providerTransactionHash(personId, externalRow.provider_transaction_id);
-        if (eventType === 'purchase') { skipped++; continue; }
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate || '') || !description || !Number.isFinite(amount)) { skipped++; continue; }
-      const eventMatches = await client.query(`
-        SELECT ae.id, old.id AS old_external_id FROM account_events ae
-        JOIN import_batches ib ON ib.id = ae.import_batch_id
-        LEFT JOIN external_transactions old ON old.linked_account_event_id = ae.id
-          AND old.connection_id = $6 AND old.item_generation < $7
-        LEFT JOIN financial_accounts old_account ON old_account.id = old.financial_account_id
-        LEFT JOIN financial_accounts new_account ON new_account.id = $8
-        WHERE ae.person_id = $1 AND ae.event_date BETWEEN $2::date - 3 AND $2::date + 3
-          AND ABS(ABS(ae.amount) - ABS($3)) < 0.001
-          AND (ae.event_type = $4 OR (ae.event_type IN ('payment', 'credit') AND $4 IN ('payment', 'credit')))
-          AND UPPER(TRIM(ae.description)) = $5
-          AND (
-            ($9 = TRUE AND ib.source <> 'plaid' AND NOT EXISTS (SELECT 1 FROM external_transactions linked WHERE linked.linked_account_event_id = ae.id))
-            OR ($9 = FALSE AND ib.source = 'plaid')
-            OR (old.id IS NOT NULL
-              AND COALESCE(old_account.persistent_account_id, old_account.provider_account_id)
-                = COALESCE(new_account.persistent_account_id, new_account.provider_account_id)
-              AND NOT EXISTS (SELECT 1 FROM external_transactions successor WHERE successor.supersedes_external_transaction_id = old.id))
-          )
-        LIMIT 20
-      `, [personId, eventDate, amount, eventType, normalizeMerchant(description), externalRow?.connection_id || 0,
-        externalRow?.item_generation || 0, externalRow?.financial_account_id || 0, Boolean(externalRow)]);
-      const availableEvents = externalRow ? eventMatches.rows : eventMatches.rows.filter(row => !consumedEventIds.has(Number(row.id)));
-      if (availableEvents.length === 1) {
-        if (externalRow && availableEvents[0].old_external_id) {
-          await client.query('UPDATE external_transactions SET linked_account_event_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [availableEvents[0].old_external_id]);
-          await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_account_event_id = $1, supersedes_external_transaction_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`, [availableEvents[0].id, availableEvents[0].old_external_id, externalRow.id]);
-        } else if (externalRow) {
-          await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_account_event_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [availableEvents[0].id, externalRow.id]);
-        }
-        consumedEventIds.add(Number(availableEvents[0].id));
-        skipped++;
-        continue;
-      }
-      if (availableEvents.length > 1) { skipped++; continue; }
-      const result = await client.query(`
-        INSERT INTO account_events
-          (person_id, import_batch_id, event_date, amount, description, event_type, source_hash)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (person_id, source_hash) DO NOTHING
-        RETURNING id
-      `, [personId, importBatchId, eventDate, amount, description, eventType, hash]);
-      if (result.rows.length) {
-        eventsImported++;
-        importedEvents.push({ id: result.rows[0].id, date: eventDate, amount, description, eventType });
-        if (externalRow) await client.query(`UPDATE external_transactions SET lifecycle_status = 'imported', linked_account_event_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [result.rows[0].id, externalRow.id]);
-      }
-      else skipped++;
-    }
-    const autoMatchedCredits = await autoMatchOfferCredits(client, personId, importedEvents);
-    const potentialOfferCredits = importedEvents.filter(event => CreditMatcher.isPotentialOfferCredit(event)).length;
-    await client.query('UPDATE import_batches SET imported_count = $1 WHERE id = $2', [imported, importBatchId]);
-    await client.query('COMMIT');
-    res.json({
-      imported,
-      eventsImported,
-      skipped,
-      importBatchId,
-      autoMatchedCredits,
-      unmatchedOfferCredits: Math.max(potentialOfferCredits - autoMatchedCredits.length, 0)
-    });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error importing transactions:', err);
-    res.status(500).json({ error: 'Failed to import transactions' });
-  } finally {
-    client.release();
-  }
+app.post('/api/transaction-imports/confirm', async (req,res) => {
+  try { res.json(await transactionImport.importReviewed(req.body)); }
+  catch(error) { console.error('Error importing transactions:',error);res.status(400).json({error:error.message}); }
 });
 
 app.get('/api/merchant-rules', async (req, res) => {
@@ -1229,70 +950,16 @@ app.get('/api/account-events', async (req, res) => {
   }
 });
 
-app.post('/api/account-events/auto-match', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    if (!req.body.personId) return res.status(400).json({ error: 'personId is required' });
-    await client.query('BEGIN');
-    const result = await client.query(`
-      SELECT id, event_date AS date, amount, description, event_type AS "eventType"
-      FROM account_events
-      WHERE person_id = $1 AND assigned_offer_credit_id IS NULL
-      ORDER BY id
-      FOR UPDATE
-    `, [req.body.personId]);
-    const matches = await autoMatchOfferCredits(client, req.body.personId, result.rows);
-    await client.query('COMMIT');
-    res.json({ matched: matches.length, matches });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error auto-matching account events:', err);
-    res.status(500).json({ error: 'Failed to auto-match account events' });
-  } finally {
-    client.release();
-  }
+app.post('/api/account-events/auto-match', async (req,res) => {
+  try {const matches=await withPersonLock(pool,req.body.personId,client=>creditReview.reviewCredits(client,Number(req.body.personId)));res.json({matched:matches.length,matches});}
+  catch(error){res.status(400).json({error:error.message});}
 });
 
-app.post('/api/account-events/:id/assign-offer', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const eventResult = await client.query(
-      'SELECT * FROM account_events WHERE id = $1 AND person_id = $2 FOR UPDATE',
-      [req.params.id, req.body.personId]
-    );
-    if (!eventResult.rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Account event not found' });
-    }
-    const event = eventResult.rows[0];
-    if (event.assigned_offer_credit_id) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Account event is already assigned' });
-    }
-    const offerResult = await client.query('SELECT id FROM offers WHERE id = $1 AND person_id = $2', [req.body.offerId, req.body.personId]);
-    if (!offerResult.rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Offer not found for this card holder' });
-    }
-    const creditResult = await client.query(`
-      INSERT INTO offer_credits (offer_id, amount, posted_date, description)
-      VALUES ($1, $2, $3, $4)
-      RETURNING *
-    `, [req.body.offerId, Math.abs(Number(event.amount)), event.event_date, event.description]);
-    await client.query('UPDATE account_events SET assigned_offer_credit_id = $1 WHERE id = $2', [creditResult.rows[0].id, event.id]);
-    await client.query('COMMIT');
-    res.json({ success: true, creditId: creditResult.rows[0].id });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error assigning account event:', err);
-    res.status(500).json({ error: 'Failed to assign account event' });
-  } finally {
-    client.release();
-  }
+app.post('/api/account-events/:id/assign-offer', async (req,res) => {
+  try {const credit=await withPersonLock(pool,req.body.personId,client=>creditReview.assignManually(client,{personId:Number(req.body.personId),eventId:positiveInteger(req.params.id,'eventId'),offerId:positiveInteger(req.body.offerId,'offerId')}));res.json({success:true,creditId:credit.id});}
+  catch(error){res.status(400).json({error:error.message});}
 });
 
-// Utility endpoints
 app.get('/api/m365/status', async (req, res) => {
   const config = M365.configFromEnv();
   const states = await pool.query('SELECT * FROM m365_sync_state ORDER BY folder_path');

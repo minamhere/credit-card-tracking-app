@@ -113,7 +113,7 @@ test('history cutoff migration is fixed, repeatable, and does not delete records
   assert.match(sql, /ADD COLUMN IF NOT EXISTS import_start_date DATE/);
   assert.match(sql, /SET import_start_date = created_at::date - 60\s+WHERE import_start_date IS NULL/);
   assert.doesNotMatch(sql, /DELETE FROM (external_transactions|transactions|account_events)/i);
-  const server = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8') + fs.readFileSync(path.join(__dirname, '../transaction-import-service.js'), 'utf8');
   // Review and both purchase/event confirmation enforce the same fixed boundary.
   assert.equal((server.match(/et.transaction_date >= c.import_start_date/g) || []).length, 3);
 });

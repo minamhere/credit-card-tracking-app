@@ -294,3 +294,14 @@ END $$;
 -- Preserve the known retail offer exclusion on the original built-in mapping.
 UPDATE merchant_category_rules SET categories = ARRAY['retail', 'home-improvement'], updated_at = CURRENT_TIMESTAMP
 WHERE UPPER(TRIM(merchant_name)) = 'HOME DEPOT' AND categories = ARRAY['retail']::text[];
+
+-- Additive decision provenance; legacy records remain unchanged.
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS review_metadata JSONB;
+ALTER TABLE offer_credits ADD COLUMN IF NOT EXISTS match_evidence JSONB;
+ALTER TABLE account_events ADD COLUMN IF NOT EXISTS review_reason TEXT;
+DO $$
+BEGIN
+ IF NOT EXISTS(SELECT assigned_offer_credit_id FROM account_events WHERE assigned_offer_credit_id IS NOT NULL GROUP BY assigned_offer_credit_id HAVING COUNT(*)>1) THEN
+  CREATE UNIQUE INDEX IF NOT EXISTS account_events_unique_credit_idx ON account_events(assigned_offer_credit_id) WHERE assigned_offer_credit_id IS NOT NULL;
+ END IF;
+END $$;

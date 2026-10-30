@@ -38,6 +38,9 @@ test('PostgreSQL matching and archived duplicate repair preserve originals and p
     assert.equal((await findPurchaseMatches(db, { ...candidate, date: '2026-09-07' })).length, 0);
     // Execute the actual confirmation route, not a copy of its matching logic.
     await db.exec(`ALTER TABLE financial_accounts ADD COLUMN selected BOOLEAN DEFAULT TRUE;
+      ALTER TABLE financial_accounts ADD COLUMN available BOOLEAN DEFAULT TRUE;
+      ALTER TABLE financial_connections ADD COLUMN item_generation INTEGER DEFAULT 1;
+      ALTER TABLE financial_connections ADD COLUMN status TEXT DEFAULT 'healthy';
       ALTER TABLE financial_connections ADD COLUMN import_start_date DATE DEFAULT '2026-01-01';
       ALTER TABLE transactions ADD COLUMN source_hash TEXT;
       CREATE TABLE import_batches (id SERIAL PRIMARY KEY, person_id INTEGER, source TEXT,
@@ -50,6 +53,10 @@ test('PostgreSQL matching and archived duplicate repair preserve originals and p
     const route = serverSource.slice(start, serverSource.indexOf('\n});', start) + 5);
     vm.runInNewContext(route, {
       app: { post(_path, callback) { handler = callback; } },
+      transactionImport: require('../transaction-import-service').createTransactionImportService({
+        pool: {connect: async()=>({query:async(...args)=>{const r=await db.query(...args);for(const row of r.rows||[])if(row.transaction_date instanceof Date)row.transaction_date=row.transaction_date.toISOString().slice(0,10);return r;},release(){}})},
+        creditReview: {reviewCredits:async()=>[]}, environment:'production'
+      }),
       pool: { connect: async () => ({ query: (...args) => db.query(...args), release() {} }) },
       positiveInteger: value => Number(value), plaidConfig: { environment: 'production' },
       // PGlite emits DATE at UTC midnight; pg emits a local calendar Date.

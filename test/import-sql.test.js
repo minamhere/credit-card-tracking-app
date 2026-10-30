@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8') + fs.readFileSync(path.join(__dirname, '../transaction-import-service.js'), 'utf8');
 const duplicateQueries = [...source.matchAll(/SELECT id FROM transactions\s+WHERE person_id = \$1[\s\S]*?LIMIT 20/g)].map(match => match[0]);
 
 test('preview and confirmation duplicate checks compare calendar dates with consistent PostgreSQL types', () => {
