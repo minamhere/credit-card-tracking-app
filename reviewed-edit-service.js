@@ -26,6 +26,14 @@ function createReviewedEditService({pool,creditReview,onChanged}) {
    return transaction;
   })).result;
  }
+ async function removeCredit(offerId,creditId) {
+  return (await forOwner('offers',offerId,async client=>{
+   await client.query('UPDATE account_events SET review_suppressed=TRUE,review_reason=$1 WHERE assigned_offer_credit_id=$2 AND person_id=(SELECT person_id FROM offers WHERE id=$3)', ['Credit assignment removed manually; automatic matching is disabled for this event',creditId,offerId]);
+   const result=await client.query('DELETE FROM offer_credits WHERE id=$1 AND offer_id=$2 RETURNING id',[creditId,offerId]);
+   if(!result.rows.length)throw Object.assign(new Error('Offer credit not found'),{status:404});
+   return result;
+  })).result;
+ }
  async function assignCreditMonth({personId,offerId,creditId,rewardMonth=null}) {
   return (await mutate(personId,async(client,id)=>{
    const offer=(await client.query('SELECT * FROM offers WHERE id=$1 AND person_id=$2',[offerId,id])).rows[0];
@@ -36,6 +44,6 @@ function createReviewedEditService({pool,creditReview,onChanged}) {
    return {id:result.id,rewardMonth};
   })).result;
  }
- return {mutate,query,forOwner,updateTransaction,assignCreditMonth,retry};
+ return {mutate,query,forOwner,updateTransaction,assignCreditMonth,removeCredit,retry};
 }
 module.exports={createReviewedEditService};

@@ -161,6 +161,21 @@
             String(event.description || '').trim().replace(/\s+/g,' ').toUpperCase()].join('|');
     }
 
+    function percentageRewardBudgets(rawOffer, transactions) {
+        const offer=Engine.normalizeOffer(rawOffer);
+        if(offer.rewardConfig.kind!=='percentage')return [];
+        const rows=[...transactions].sort((a,b)=>String(a.date).localeCompare(String(b.date))||Number(a.id)-Number(b.id));
+        const total=rows.reduce((sum,t)=>sum+Number(t.amount),0);
+        const active=total>=Number(offer.rewardConfig.activationThreshold||0);
+        let spend=0,previous=0;
+        return rows.map(transaction=>{
+            spend+=Number(transaction.amount);
+            const gross=active?Math.min(cents(spend*Number(offer.rewardConfig.rate)/100),offer.rewardConfig.cap==null?Infinity:cents(offer.rewardConfig.cap)):0;
+            const available=Math.max(0,gross-previous);previous=gross;
+            return {transaction,available};
+        });
+    }
+
     function periodPlans(event, { offer: rawOffer, progress }) {
         const offer = Engine.normalizeOffer(rawOffer);
         if (!progress || (offer.reviewStatus && offer.reviewStatus !== 'confirmed')) return [];
@@ -199,14 +214,7 @@
             const outstanding = expected - posted;
             if (amount <= 0 || amount > outstanding) continue;
             const percentage = offer.rewardConfig.kind === 'percentage';
-            let accumulated = 0, previous = 0;
-            const budgets = ts.map(t => {
-                accumulated += Number(t.amount);
-                const gross = percentage ? Math.min(cents(accumulated * Number(offer.rewardConfig.rate) / 100),
-                    offer.rewardConfig.cap == null ? Infinity : cents(offer.rewardConfig.cap)) : 0;
-                const available = Math.max(0,gross-previous); previous = gross;
-                return { transaction: t, available };
-            });
+            const budgets = percentage ? percentageRewardBudgets(offer,ts) : ts.map(transaction=>({transaction,available:0}));
             const threshold = Number(offer.rewardConfig.activationThreshold || 0);
             function options() {
                 const candidates = [];
@@ -218,7 +226,7 @@
                     positive.forEach(b=>{const key=String(b.transaction.date).slice(0,10);days.set(key,[...(days.get(key)||[]),b]);});
                     for(const list of days.values()) if(list.length>1)add('day',list,list.reduce((s,b)=>s+b.available,0));
                 }
-                if (percentage && threshold > 0) {
+                if (percentage) {
                     let spend=0;
                     for(let i=0;i<ts.length;i++) {
                         spend += Number(ts[i].amount);
@@ -252,24 +260,24 @@
                     if(uncertain)break;
                 }
                 if(uncertain)continue;
-                const matches=options().filter(o=>Math.abs(o.value-amount)<=2 && o.value>=amount);
+                const matches=options().filter(o=>Math.abs(o.value-amount)<=2 && o.value>=amount && (!requested.month || o.list.every(b=>String(b.transaction.date).slice(0,7)===requested.month)));
                 const unique=new Map(matches.map(o=>[o.list.map(b=>b.transaction.id).join(','),o]));
                 if(unique.size!==1)continue;
                 const chosen=[...unique.values()][0];
                 let remaining=amount;
                 const allocations=chosen.list.map(b=>{const used=Math.min(b.available,remaining);remaining-=used;return {transactionId:b.transaction.id,amount:used/100};}).filter(a=>a.amount>0);
                 const transactionIds=allocations.map(a=>a.transactionId);
-                result.push({offer,progress,rewardMonth:monthly?period:null,score:100,
+                result.push({offer,progress,rewardMonth:monthly?period:requested.month,score:100,
                     reasons:[`amount matches ${chosen.kind === 'day' ? 'one day of qualifying purchases' : chosen.kind === 'transaction' ? 'one qualifying purchase' : chosen.kind === 'checkpoint' ? 'a reward checkpoint' : 'the remaining earned reward'}`],
-                    evidence:{version:1,kind:chosen.kind,rewardMonth:monthly?period:null,transactionIds,allocations,
+                    evidence:{version:1,kind:chosen.kind,rewardMonth:monthly?period:requested.month,transactionIds,allocations,
                         checkpointTransactionId:chosen.kind==='checkpoint'?transactionIds.at(-1):null,creditedAmount:amount/100}});
             } else {
                 let metric=0;
                 const checkpoints=ts.map(t=>{metric+=offer.measurement.kind==='count'?1:Number(t.amount);return {t,reward:cents(Engine.calculateReward(metric,offer.rewardConfig).earnedReward)-posted};});
                 const checkpoint=checkpoints.find(c=>c.reward>=amount&&Math.abs(c.reward-amount)<=2);
-                if(!checkpoint)continue;
-                result.push({offer,progress,rewardMonth:monthly?period:null,score:100,reasons:['amount matches an unpaid reward checkpoint'],
-                    evidence:{version:1,kind:'checkpoint',rewardMonth:monthly?period:null,transactionIds:ts.slice(0,ts.indexOf(checkpoint.t)+1).map(t=>t.id),allocations:[],checkpointTransactionId:checkpoint.t.id,creditedAmount:amount/100}});
+                if(!checkpoint || (requested.month && ts.slice(0,ts.indexOf(checkpoint.t)+1).some(t=>String(t.date).slice(0,7)!==requested.month)))continue;
+                result.push({offer,progress,rewardMonth:monthly?period:requested.month,score:100,reasons:['amount matches an unpaid reward checkpoint'],
+                    evidence:{version:1,kind:'checkpoint',rewardMonth:monthly?period:requested.month,transactionIds:ts.slice(0,ts.indexOf(checkpoint.t)+1).map(t=>t.id),allocations:[],checkpointTransactionId:checkpoint.t.id,creditedAmount:amount/100}});
             }
         }
         return result;
@@ -288,5 +296,5 @@
             rewardMonth:best.rewardMonth,evidence:best.evidence,rankings};
     }
 
-    return { isPotentialOfferCredit, percentageCheckpointDetails, percentageCheckpoints, percentagePurchaseDetails, scoreCandidate, earnedMonth, eventIdentity, findCreditMatch };
+    return { isPotentialOfferCredit, percentageCheckpointDetails, percentageCheckpoints, percentagePurchaseDetails, scoreCandidate, percentageRewardBudgets, earnedMonth, eventIdentity, findCreditMatch };
 });

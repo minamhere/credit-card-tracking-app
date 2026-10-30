@@ -50,3 +50,13 @@ test('historical credit with unknown month reserves possible reward evidence',()
  const o=offer({credits:[{amount:4.5}]});
  assert.equal(findCreditMatch(event(),[candidate(o,[tx(1,90),tx(2,90,'2026-09-03')])]).matched,false);
 });
+test('explicit month rejects a nonmonthly offer outside that month and retains compatible month evidence',()=>{
+ const o=offer({startDate:'2026-09-01',endDate:'2026-09-30',measurement:{kind:'spend',period:'offer'}});
+ assert.equal(findCreditMatch(event(5),[candidate(o,[tx(1,100,'2026-09-03')])]).matched,false);
+ const valid=findCreditMatch(event(5,{description:'Statement Credit 09/01/26 - 09/30/26'}),[candidate(o,[tx(1,100,'2026-09-03')])]);
+ assert.equal(valid.matched,true);assert.equal(valid.rewardMonth,'2026-09');
+});
+test('ordinary percentage rewards retain unique chronological checkpoint payouts',()=>{
+ const m=findCreditMatch(event(7.5),[candidate(offer(),[tx(1,50,'2026-10-01'),tx(2,100,'2026-10-02'),tx(3,200,'2026-10-03')])]);
+ assert.equal(m.matched,true);assert.deepEqual(m.evidence.transactionIds,[1,2]);
+});

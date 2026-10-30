@@ -560,20 +560,10 @@ app.post('/api/offers/:id/credits', async (req, res) => {
   }
 });
 
-app.delete('/api/offers/:offerId/credits/:creditId', async (req, res) => {
-  try {
-    const {result} = await reviewedEdits.forOwner('offers',req.params.offerId,async client=>{return client.query(
-      'DELETE FROM offer_credits WHERE id = $1 AND offer_id = $2 RETURNING id',
-      [req.params.creditId, req.params.offerId]
-    );});
-    if (!result.rows.length) return res.status(404).json({ error: 'Offer credit not found' });
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Error deleting offer credit:', err);
-    res.status(500).json({ error: 'Failed to delete offer credit' });
-  }
+app.delete('/api/offers/:offerId/credits/:creditId', async (req,res) => {
+  try {await reviewedEdits.removeCredit(Number(req.params.offerId),Number(req.params.creditId));res.json({success:true});}
+  catch(error){res.status(error.status||400).json({error:error.message});}
 });
-
 // Transactions endpoints
 app.get('/api/transactions', async (req, res) => {
   try {
@@ -734,12 +724,14 @@ app.get('/api/plaid/review', async (req, res) => {
 app.post('/api/plaid/conflicts/:id/resolve', async (req, res) => {
   if (!requirePlaid(res)) return;
   const client = await pool.connect();
+  let released = false;
   try {
     const personId = positiveInteger(req.body.personId, 'personId');
     const conflictId = positiveInteger(req.params.id, 'conflictId');
     const action = req.body.action;
     if (!['keep', 'update'].includes(action)) return res.status(400).json({ error: 'action must be keep or update' });
     await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(72601, $1)',[personId]);
     const result = await client.query(`
       SELECT et.* FROM external_transactions et
       JOIN financial_connections c ON c.id = et.connection_id AND c.environment = $3
@@ -774,12 +766,15 @@ app.post('/api/plaid/conflicts/:id/resolve', async (req, res) => {
     }
     await client.query("UPDATE external_transactions SET lifecycle_status = $1, conflict_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
       [action === 'keep' ? 'ignored' : 'imported', conflictId]);
+    await creditReview.flagInvalidEvidence(client,personId);
     await client.query('COMMIT');
-    res.json({ id: conflictId, resolution: action });
+    client.release();
+    released = true;
+    res.json({ id: conflictId, resolution: action, review: await reviewedEdits.retry(personId) });
   } catch (error) {
     await client.query('ROLLBACK');
     plaidRouteError(res, error);
-  } finally { client.release(); }
+  } finally { if(!released) client.release(); }
 });
 
 app.post('/api/transaction-imports/preview', async (req, res) => {

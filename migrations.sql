@@ -292,8 +292,15 @@ BEGIN
 END $$;
 
 -- Preserve the known retail offer exclusion on the original built-in mapping.
-UPDATE merchant_category_rules SET categories = ARRAY['retail', 'home-improvement'], updated_at = CURRENT_TIMESTAMP
-WHERE UPPER(TRIM(merchant_name)) = 'HOME DEPOT' AND categories = ARRAY['retail']::text[];
+DO $$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM app_migration_history WHERE migration_key='home_depot_exclusion_2026_10_29') THEN
+  UPDATE merchant_category_rules SET categories=ARRAY['retail','home-improvement'],updated_at=CURRENT_TIMESTAMP
+  WHERE UPPER(TRIM(merchant_name))='HOME DEPOT' AND match_type='contains'
+    AND merchant_pattern IN ('THE HOME DEPOT #1510') AND categories=ARRAY['retail']::text[];
+  INSERT INTO app_migration_history(migration_key) VALUES('home_depot_exclusion_2026_10_29');
+ END IF;
+END $$;
 
 -- Additive decision provenance; legacy records remain unchanged.
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS review_metadata JSONB;
@@ -307,3 +314,5 @@ BEGIN
 END $$;
 
 ALTER TABLE financial_connections ADD COLUMN IF NOT EXISTS last_review_summary JSONB;
+
+ALTER TABLE account_events ADD COLUMN IF NOT EXISTS review_suppressed BOOLEAN NOT NULL DEFAULT FALSE;

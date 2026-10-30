@@ -16,9 +16,9 @@ An explicit single-month range in the credit description identifies the earned m
 
 Purchase and daily evidence share the same reward budget. Fixed/tiered rewards use period/checkpoint evidence: a paid first tier cannot be paid again when the next tier is reached. The same purchase may still support separate overlapping offers.
 
-Legacy credits consume the unpaid budget too. When old evidence cannot be reconstructed confidently, the matcher reserves it conservatively. Repeated same-description/date/amount credit records are flagged, never deleted or silently combined. Compare the original bank records before changing their assignments. Deliberate manual assignments remain available and are identified separately.
+Legacy credits consume the unpaid budget too. When old evidence cannot be reconstructed confidently, the matcher reserves it conservatively. Repeated same-description/date/amount credit records are flagged, never deleted or silently combined. Compare the original bank records before changing their assignments. Deliberate manual assignments remain available and are identified separately. Removing an assignment suppresses automatic matching for that account event; an explicit manual assignment can restore it.
 
-Changing a purchase category, amount, earned month, or offer terms may invalidate earlier credit evidence. The credit remains posted at its original amount; its explanation requests review. The dashboard displays these results without assigning credits merely because it was opened.
+Changing a purchase category, amount, earned month, or offer terms may invalidate earlier credit evidence. A newly arrived earlier purchase can also change which purchases consume a reward cap. The credit remains posted at its original amount; its explanation requests review. The dashboard displays these results without assigning credits merely because it was opened.
 
 ## Counts, retries, and failures
 
@@ -44,7 +44,7 @@ Before applying this version to an existing NAS:
 
 1. Back up PostgreSQL and verify the current application revision and data volume.
 2. Verify `app_migration_history` contains `one_time_clean_reset_2026_09_27`. The repository has an older reset migration; investigate a missing marker before starting a deployment that runs it.
-3. Review the additive provenance/evidence/summary columns and the targeted legacy Home Depot rule correction in `migrations.sql`.
+3. Review the additive provenance/evidence/summary columns and the one-time correction of the known legacy Home Depot rule in `migrations.sql`.
 4. Deploy the reviewed application revision with the existing database volume and existing Plaid/M365 credentials. Start with automatic review disabled if an additional live-data preview is needed.
 5. Enable automatic review, sync one selected connection, and verify counts, unresolved items, and saved credit explanations. Sync/retry again and verify no duplicate records.
 
