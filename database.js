@@ -433,6 +433,16 @@ class DatabaseManager {
         return response.json();
     }
 
+    async reviewTransactions() {
+        const response = await fetch(`${this.baseUrl}/api/transactions/review`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personId: this.currentPersonId })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Automatic review failed');
+        return result;
+    }
+
     async assignAccountEvent(eventId, offerId) {
         const response = await fetch(`${this.baseUrl}/api/account-events/${eventId}/assign-offer`, {
             method: 'POST',

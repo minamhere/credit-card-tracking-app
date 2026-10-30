@@ -206,11 +206,14 @@ function createConnectionService({ pool, plaidClient, config }) {
     async getStatus(personId) {
       const result = await pool.query(`
         SELECT c.id AS connection_id, c.status, c.environment, c.last_attempt_at,
-               c.last_success_at, c.consent_expiration_at, c.last_error_code,
+               c.last_success_at, c.consent_expiration_at, c.last_error_code, c.last_review_summary,
                a.id AS account_id, a.provider_account_id, a.display_name, a.official_name,
                a.account_type, a.account_subtype, a.mask, a.selected,
                COUNT(et.id) FILTER (WHERE et.lifecycle_status = 'awaiting_review'
-                 AND et.transaction_date >= c.import_start_date) AS review_count
+                 AND et.transaction_date >= c.import_start_date
+                 AND et.financial_account_id=a.id AND a.selected=TRUE
+                 AND et.person_id=c.person_id AND et.item_generation=c.item_generation
+                 AND et.pending=FALSE) AS review_count
         FROM financial_connections c
         LEFT JOIN financial_accounts a ON a.connection_id = c.id
         LEFT JOIN external_transactions et ON et.connection_id = c.id
@@ -227,6 +230,7 @@ function createConnectionService({ pool, plaidClient, config }) {
             environment: row.environment,
             lastAttemptAt: row.last_attempt_at,
             lastSuccessAt: row.last_success_at,
+            lastReview: row.last_review_summary,
             consentExpirationAt: row.consent_expiration_at,
             lastErrorCode: row.last_error_code,
             reviewCount: Number(row.review_count || 0),

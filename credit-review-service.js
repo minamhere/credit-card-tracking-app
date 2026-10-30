@@ -1,5 +1,7 @@
 const Engine=require('./offer-engine');
 const Matcher=require('./credit-matcher');
+const offerSnapshot=o=>JSON.stringify([o.startDate,o.endDate,o.eligibility,o.measurement,o.rewardConfig]);
+const purchaseSnapshot=t=>JSON.stringify([t.id,t.date,t.amount,t.merchant,t.categories,t.transactionType]);
 function createCreditReviewService({serializeOffer}) {
  async function load(client,personId) {
   const offers=(await client.query('SELECT * FROM offers WHERE person_id=$1 ORDER BY id',[personId])).rows;
@@ -17,7 +19,8 @@ function createCreditReviewService({serializeOffer}) {
    const metric=offer.measurement.kind==='count'?periodTx.length:periodTx.reduce((s,t)=>s+t.amount,0);
    const expected=Engine.calculateReward(metric,offer.rewardConfig).earnedReward;
    const posted=credits.filter(c=>c.offer_id===row.id&&c.reward_month===credit.reward_month).reduce((s,c)=>s+Number(c.amount),0);
-   const valid=row.review_status==='confirmed' && expected>=posted && evidence.transactionIds.every(id=>periodTx.some(t=>Number(t.id)===Number(id)));
+   const unchanged=(!Object.hasOwn(evidence,'rewardMonth') || evidence.rewardMonth===(credit.reward_month||null)) && (!evidence.offerSnapshot || evidence.offerSnapshot===offerSnapshot(offer)) && (!evidence.purchaseSnapshots || evidence.purchaseSnapshots.every(snapshot=>periodTx.some(t=>purchaseSnapshot(t)===snapshot)));
+   const valid=unchanged && row.review_status==='confirmed' && expected>=posted && evidence.transactionIds.every(id=>periodTx.some(t=>Number(t.id)===Number(id)));
    if(!valid&&evidence.status!=='needs_review')await client.query("UPDATE offer_credits SET match_evidence=$1 WHERE id=$2",[{...evidence,status:'needs_review',reviewReason:'Purchase categories, offer terms, or earned month changed; review this credit'},credit.id]);
   }
  }
@@ -25,6 +28,10 @@ function createCreditReviewService({serializeOffer}) {
   await flagInvalidEvidence(client,personId);
   const {offers,tx,credits}=await load(client,personId);
   const events=(await client.query('SELECT id,event_date AS date,amount,description,event_type AS "eventType",assigned_offer_credit_id AS "assignedOfferCreditId" FROM account_events WHERE person_id=$1 ORDER BY id FOR UPDATE',[personId])).rows;
+  for(const event of events) {
+   if(Matcher.isPotentialOfferCredit(event)&&events.some(other=>other.id!==event.id&&Matcher.eventIdentity(other)===Matcher.eventIdentity(event)))
+    await client.query('UPDATE account_events SET review_reason=$1 WHERE id=$2',['Possible duplicate statement credit; compare source records before changing assignments',event.id]);
+  }
   const matches=[];
   let changed;
   do {changed=false;
@@ -32,7 +39,8 @@ function createCreditReviewService({serializeOffer}) {
     const candidates=offers.filter(o=>o.review_status==='confirmed').map(row=>{const offer=serializeOffer(row,credits.filter(c=>c.offer_id===row.id).map(creditObject));return {offer,progress:Engine.calculateOfferProgress(offer,tx)};});
     const match=Matcher.findCreditMatch(event,candidates,{events});
     if(!match.matched){await client.query('UPDATE account_events SET review_reason=$1 WHERE id=$2',[match.reason,event.id]);continue;}
-    const evidence={...match.evidence,assignmentMethod:'automatic',status:'matched'};
+    const matchedOffer=candidates.find(c=>Number(c.offer.id)===Number(match.offerId)).offer;
+    const evidence={...match.evidence,assignmentMethod:'automatic',status:'matched',offerSnapshot:offerSnapshot(matchedOffer),purchaseSnapshots:tx.filter(t=>match.evidence.transactionIds.includes(t.id)).map(purchaseSnapshot)};
     const saved=(await client.query('INSERT INTO offer_credits(offer_id,amount,posted_date,description,reward_month,match_evidence) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[match.offerId,Math.abs(Number(event.amount)),event.date,event.description,match.rewardMonth,evidence])).rows[0];
     await client.query('UPDATE account_events SET assigned_offer_credit_id=$1,review_reason=$2 WHERE id=$3 AND assigned_offer_credit_id IS NULL',[saved.id,match.reasons.join('; '),event.id]);
     event.assignedOfferCreditId=saved.id;credits.push(saved);changed=true;

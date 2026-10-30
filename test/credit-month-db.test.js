@@ -9,6 +9,8 @@ test('earned-month assignments persist without changing credits and enforce offe
 }, async () => {
   const { PGlite } = require(process.env.PGLITE_TEST_MODULE);
   const db = new PGlite();
+  const { createReviewedEditService } = require('../reviewed-edit-service');
+  const edits = createReviewedEditService({pool:{connect:async()=>({query:(...args)=>db.query(...args),release(){}})},creditReview:{flagInvalidEvidence:async()=>{}}});
   try {
     await db.exec(`CREATE TABLE offers (id INTEGER PRIMARY KEY, person_id INTEGER,
       monthly_tracking BOOLEAN, start_date TEXT, end_date TEXT);
@@ -22,7 +24,7 @@ test('earned-month assignments persist without changing credits and enforce offe
     const start = source.indexOf("app.patch('/api/offers/:offerId/credits/:creditId/month'");
     let handler;
     vm.runInNewContext(source.slice(start, source.indexOf('\n});', start) + 5), {
-      app: { patch(_path, callback) { handler = callback; } }, pool: db,
+      app: { patch(_path, callback) { handler = callback; } }, pool: db, reviewedEdits: edits,
       positiveInteger(value) { const id = Number(value); if (!Number.isInteger(id) || id <= 0) throw new Error('Invalid id'); return id; },
       console: { error() {} }
     });

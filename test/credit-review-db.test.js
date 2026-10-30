@@ -18,3 +18,11 @@ test('credits persist earned month and evidence exactly once; duplicate twins st
  assert.equal((await h.db.query('SELECT match_evidence FROM offer_credits')).rows[0].match_evidence.status,'needs_review');
  }finally{await h.close()}
 });
+test('offer changes invalidate earlier evidence even when the new reward is larger',{skip:!process.env.PGLITE_TEST_MODULE},async()=>{
+ const h=await reviewDb();try{
+ await seedOffer(h.db);await h.db.exec(`INSERT INTO transactions(person_id,date,amount,merchant,categories) VALUES(1,'2026-10-03',90,'Target',ARRAY['retail']);INSERT INTO account_events(person_id,event_date,amount,description,event_type,source_hash) VALUES(1,'2026-09-28',-4.50,'Statement Credit 10/01/26 - 10/31/26','credit','c1');`);
+ const service=createCreditReviewService({serializeOffer});await service.reviewCredits(h.db,1);
+ await h.db.exec(`UPDATE offers SET reward_config='{"kind":"percentage","rate":10,"cap":80}'`);await service.flagInvalidEvidence(h.db,1);
+ const c=(await h.db.query('SELECT amount,match_evidence FROM offer_credits')).rows[0];assert.equal(c.match_evidence.status,'needs_review');assert.equal(Number(c.amount),4.5);
+ }finally{await h.close()}
+});

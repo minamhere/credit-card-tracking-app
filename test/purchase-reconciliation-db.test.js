@@ -53,6 +53,7 @@ test('PostgreSQL matching and archived duplicate repair preserve originals and p
     const route = serverSource.slice(start, serverSource.indexOf('\n});', start) + 5);
     vm.runInNewContext(route, {
       app: { post(_path, callback) { handler = callback; } },
+      reviewedEdits: {retry: async()=>null},
       transactionImport: require('../transaction-import-service').createTransactionImportService({
         pool: {connect: async()=>({query:async(...args)=>{const r=await db.query(...args);for(const row of r.rows||[])if(row.transaction_date instanceof Date)row.transaction_date=row.transaction_date.toISOString().slice(0,10);return r;},release(){}})},
         creditReview: {reviewCredits:async()=>[]}, environment:'production'

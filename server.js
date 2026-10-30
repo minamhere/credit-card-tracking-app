@@ -10,6 +10,7 @@ const CreditMatcher = require('./credit-matcher');
 const { createCreditReviewService } = require('./credit-review-service');
 const { createTransactionImportService } = require('./transaction-import-service');
 const { withPersonLock } = require('./review-lock');
+const { createReviewedEditService } = require('./reviewed-edit-service');
 const { createTransactionReviewService } = require('./transaction-review-service');
 const { classifyMerchant } = require('./merchant-classifier');
 const M365 = require('./m365');
@@ -166,6 +167,8 @@ async function findDuplicateOffer(personId, fingerprint) {
 const creditReview = createCreditReviewService({ serializeOffer });
 const transactionImport = createTransactionImportService({ pool, creditReview, environment: plaidConfig.environment });
 const transactionReview = createTransactionReviewService({ pool, importService: transactionImport, creditReview, environment: plaidConfig.environment });
+
+const reviewedEdits = createReviewedEditService({ pool, creditReview, onChanged: personId => transactionReview.reviewPerson(personId) });
 
 // Run migrations on startup
 async function runMigrations() {
@@ -345,7 +348,7 @@ app.get('/api/offers', async (req, res) => {
     ) : { rows: [] };
     const offers = result.rows.map(row => serializeOffer(row, creditsResult.rows
       .filter(credit => credit.offer_id === row.id)
-      .map(credit => ({ id: credit.id, amount: Number(credit.amount), postedDate: credit.posted_date, description: credit.description, rewardMonth: credit.reward_month || null }))));
+      .map(credit => ({ id: credit.id, amount: Number(credit.amount), postedDate: credit.posted_date, description: credit.description, matchEvidence: credit.match_evidence || null, rewardMonth: credit.reward_month || null }))));
     res.json(offers);
   } catch (err) {
     console.error('Error fetching offers:', err);
@@ -393,7 +396,7 @@ app.post('/api/offers', async (req, res) => {
       }
     }
 
-    const result = await pool.query(`
+    const result = await reviewedEdits.query(personId,`
       INSERT INTO offers (
         name, type, start_date, end_date, spending_target,
         transaction_target, min_transaction, categories, reward,
@@ -432,7 +435,7 @@ app.put('/api/offers/:id', async (req, res) => {
       offerFingerprint
     } = req.body;
 
-    const result = await pool.query(`
+    const result = await reviewedEdits.query(personId,`
       UPDATE offers SET
         name = $1, type = $2, start_date = $3, end_date = $4,
         spending_target = $5, transaction_target = $6, min_transaction = $7,
@@ -441,7 +444,7 @@ app.put('/api/offers/:id', async (req, res) => {
         eligibility = $18, measurement = $19, reward_config = $20, engine_version = 2,
         source_type = $21, source_external_id = $22, source_metadata = $23, review_status = $24,
         offer_fingerprint = $25
-      WHERE id = $26
+      WHERE id = $26 AND person_id = $14
       RETURNING *
     `, [
       name, type, startDate, endDate, spendingTarget,
@@ -469,7 +472,7 @@ app.put('/api/offers/:id', async (req, res) => {
 app.delete('/api/offers/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM offers WHERE id = $1 RETURNING id', [id]);
+    const {result} = await reviewedEdits.forOwner('offers',req.params.id,async client=>{return client.query('DELETE FROM offers WHERE id = $1 RETURNING id', [id]);});
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Offer not found' });
@@ -487,12 +490,12 @@ app.patch('/api/offers/:id', async (req, res) => {
     const { id } = req.params;
     const { bonusPosted, bonusPostedDate, bonusPostedAmount, hidden } = req.body;
 
-    const result = await pool.query(`
+    const {result} = await reviewedEdits.forOwner('offers',req.params.id,async client=>{return client.query(`
       UPDATE offers
       SET bonus_posted = $1, bonus_posted_date = $2, bonus_posted_amount = $3, hidden = $4
       WHERE id = $5
       RETURNING *
-    `, [bonusPosted, bonusPostedDate, bonusPostedAmount, hidden, id]);
+    `, [bonusPosted, bonusPostedDate, bonusPostedAmount, hidden, id]);});
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Offer not found' });
@@ -521,8 +524,9 @@ app.get('/api/offers/:id', async (req, res) => {
       id: credit.id,
       amount: Number(credit.amount),
       postedDate: credit.posted_date,
-      rewardMonth: credit.reward_month || null,
-      description: credit.description
+      matchEvidence: credit.match_evidence || null, rewardMonth: credit.reward_month || null,
+      description: credit.description,
+      matchEvidence: credit.match_evidence || null
     })));
 
     res.json(offer);
@@ -532,26 +536,9 @@ app.get('/api/offers/:id', async (req, res) => {
   }
 });
 
-app.patch('/api/offers/:offerId/credits/:creditId/month', async (req, res) => {
-  try {
-    const personId = positiveInteger(req.body.personId, 'personId');
-    const rewardMonth = req.body.rewardMonth || null;
-    const offerResult = await pool.query('SELECT * FROM offers WHERE id = $1 AND person_id = $2',
-      [positiveInteger(req.params.offerId, 'offerId'), personId]);
-    if (!offerResult.rows.length) return res.status(404).json({ error: 'Offer not found for this cardholder.' });
-    const offer = offerResult.rows[0];
-    if (rewardMonth && (!offer.monthly_tracking || !/^\d{4}-(0[1-9]|1[0-2])$/.test(rewardMonth) ||
-        rewardMonth < String(offer.start_date).slice(0, 7) || rewardMonth > String(offer.end_date).slice(0, 7))) {
-      return res.status(400).json({ error: 'Choose an earned month within this monthly offer.' });
-    }
-    const result = await pool.query('UPDATE offer_credits SET reward_month = $1 WHERE id = $2 AND offer_id = $3 RETURNING id',
-      [rewardMonth, positiveInteger(req.params.creditId, 'creditId'), offer.id]);
-    if (!result.rows.length) return res.status(404).json({ error: 'Offer credit not found.' });
-    res.json({ id: result.rows[0].id, rewardMonth });
-  } catch (error) {
-    console.error('Error assigning credit month:', error);
-    res.status(400).json({ error: 'Unable to assign the earned month.' });
-  }
+app.patch('/api/offers/:offerId/credits/:creditId/month', async (req,res) => {
+  try {res.json(await reviewedEdits.assignCreditMonth({personId:positiveInteger(req.body.personId,'personId'),offerId:positiveInteger(req.params.offerId,'offerId'),creditId:positiveInteger(req.params.creditId,'creditId'),rewardMonth:req.body.rewardMonth||null}));}
+  catch(error){res.status(error.status||400).json({error:error.message});}
 });
 
 app.post('/api/offers/:id/credits', async (req, res) => {
@@ -560,11 +547,11 @@ app.post('/api/offers/:id/credits', async (req, res) => {
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ error: 'A positive credit amount is required.' });
     }
-    const result = await pool.query(`
-      INSERT INTO offer_credits (offer_id, amount, posted_date, description, source_transaction_id)
-      VALUES ($1, $2, $3, $4, $5)
+    const {result} = await reviewedEdits.forOwner('offers',req.params.id,async client=>{return client.query(`
+      INSERT INTO offer_credits (offer_id, amount, posted_date, description, source_transaction_id, match_evidence)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
-    `, [req.params.id, amount, req.body.postedDate || null, req.body.description || '', req.body.sourceTransactionId || null]);
+    `, [req.params.id, amount, req.body.postedDate || null, req.body.description || '', req.body.sourceTransactionId || null, {version:1,assignmentMethod:'manual',status:'manual'}]);});
     const credit = result.rows[0];
     res.json({ id: credit.id, amount: Number(credit.amount), postedDate: credit.posted_date, description: credit.description });
   } catch (err) {
@@ -575,10 +562,10 @@ app.post('/api/offers/:id/credits', async (req, res) => {
 
 app.delete('/api/offers/:offerId/credits/:creditId', async (req, res) => {
   try {
-    const result = await pool.query(
+    const {result} = await reviewedEdits.forOwner('offers',req.params.offerId,async client=>{return client.query(
       'DELETE FROM offer_credits WHERE id = $1 AND offer_id = $2 RETURNING id',
       [req.params.creditId, req.params.offerId]
-    );
+    );});
     if (!result.rows.length) return res.status(404).json({ error: 'Offer credit not found' });
     res.json({ success: true });
   } catch (err) {
@@ -605,7 +592,7 @@ app.get('/api/transactions', async (req, res) => {
     const transactions = result.rows.map(row => ({
       id: row.id,
       date: row.date,
-      amount: row.amount,
+      amount: Number(row.amount),
       merchant: row.merchant,
       categories: row.categories || [],
       description: row.description,
@@ -613,7 +600,8 @@ app.get('/api/transactions', async (req, res) => {
       rawMerchant: row.raw_merchant || row.merchant,
       transactionType: row.transaction_type || 'purchase',
       source: row.source || 'manual',
-      importBatchId: row.import_batch_id
+      importBatchId: row.import_batch_id,
+      reviewMetadata: row.review_metadata || null
     }));
     res.json(transactions);
   } catch (err) {
@@ -622,11 +610,16 @@ app.get('/api/transactions', async (req, res) => {
   }
 });
 
+app.post('/api/transactions/review', async (req,res) => {
+  try {res.json(await transactionReview.reviewPerson(positiveInteger(req.body.personId,'personId')));}
+  catch(error){res.status(400).json({error:error.message});}
+});
+
 app.post('/api/transactions', async (req, res) => {
   try {
     const { date, amount, merchant, categories, description, personId, transactionType } = req.body;
 
-    const result = await pool.query(`
+    const result = await reviewedEdits.query(personId,`
       INSERT INTO transactions (date, amount, merchant, categories, description, person_id, raw_merchant, transaction_type)
       VALUES ($1, $2, $3, $4, $5, $6, $3, $7)
       RETURNING *
@@ -651,43 +644,16 @@ app.post('/api/transactions', async (req, res) => {
   }
 });
 
-app.put('/api/transactions/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { date, amount, merchant, categories, description, personId } = req.body;
-
-    const result = await pool.query(`
-      UPDATE transactions SET
-        date = $1, amount = $2, merchant = $3, categories = $4, description = $5, person_id = $6
-      WHERE id = $7
-      RETURNING *
-    `, [date, amount, merchant, categories || [], description || '', personId, id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-
-    const transaction = {
-      id: result.rows[0].id,
-      date: result.rows[0].date,
-      amount: result.rows[0].amount,
-      merchant: result.rows[0].merchant,
-      categories: result.rows[0].categories || [],
-      description: result.rows[0].description,
-      personId: result.rows[0].person_id
-    };
-
-    res.json(transaction);
-  } catch (err) {
-    console.error('Error updating transaction:', err);
-    res.status(500).json({ error: 'Failed to update transaction' });
-  }
+app.put('/api/transactions/:id', async (req,res) => {
+  try { const row=await reviewedEdits.updateTransaction(positiveInteger(req.params.id,'transactionId'),req.body);
+    res.json({id:row.id,date:row.date,amount:Number(row.amount),merchant:row.merchant,categories:row.categories,description:row.description,personId:row.person_id,reviewMetadata:row.review_metadata});
+  } catch(error){res.status(error.status||400).json({error:error.message});}
 });
 
 app.delete('/api/transactions/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM transactions WHERE id = $1 RETURNING id', [id]);
+    const {result} = await reviewedEdits.forOwner('transactions',req.params.id,async client=>{return client.query('DELETE FROM transactions WHERE id = $1 RETURNING id', [id]);});
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction not found' });
@@ -894,7 +860,7 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
 });
 
 app.post('/api/transaction-imports/confirm', async (req,res) => {
-  try { res.json(await transactionImport.importReviewed(req.body)); }
+  try {const result=await transactionImport.importReviewed(req.body);result.review=await reviewedEdits.retry(req.body.personId);res.json(result);}
   catch(error) { console.error('Error importing transactions:',error);res.status(400).json({error:error.message}); }
 });
 
@@ -934,9 +900,9 @@ app.get('/api/account-events', async (req, res) => {
   try {
     if (!req.query.personId) return res.status(400).json({ error: 'personId is required' });
     const result = await pool.query(`
-      SELECT * FROM account_events
-      WHERE person_id = $1
-      ORDER BY event_date DESC, id DESC
+      SELECT ae.*,oc.match_evidence FROM account_events ae LEFT JOIN offer_credits oc ON oc.id=ae.assigned_offer_credit_id
+      WHERE ae.person_id = $1
+      ORDER BY ae.event_date DESC, ae.id DESC
     `, [req.query.personId]);
     res.json(result.rows.map(row => ({
       id: row.id,
@@ -944,7 +910,9 @@ app.get('/api/account-events', async (req, res) => {
       amount: Number(row.amount),
       description: row.description,
       eventType: row.event_type,
-      assignedOfferCreditId: row.assigned_offer_credit_id
+      assignedOfferCreditId: row.assigned_offer_credit_id,
+      reviewReason: row.match_evidence?.reviewReason || row.review_reason || null,
+      requiresReview: row.match_evidence?.status === 'needs_review'
     })));
   } catch (err) {
     console.error('Error fetching account events:', err);

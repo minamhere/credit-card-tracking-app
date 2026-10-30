@@ -61,6 +61,7 @@
                 <div class="posted-credit-amount">+${currency(credit.amount)}</div>
                 <div><strong>${escapeHtml(credit.description || 'Statement credit')}</strong>
                 <small>${credit.postedDate ? `Citi date ${escapeHtml(String(credit.postedDate).slice(0, 10))} (may be backdated)` : 'Posting date unavailable'}${credit.inferred ? ' · Suggested earned month; confirm below' : ''}</small>
+                ${credit.matchEvidence ? `<small>${escapeHtml(credit.matchEvidence.reviewReason || (credit.matchEvidence.reasons || []).join('; ') || 'Manually assigned')}${credit.matchEvidence.transactionIds?.length ? ` · Supporting purchases: ${escapeHtml(credit.matchEvidence.transactionIds.join(', '))}` : ''}</small>` : ''}
                 ${credit.id ? `<label class="credit-month-label">Earned month <select aria-label="Earned month for credit ${Number(credit.id)}" onchange="tracker.assignCreditMonth(${Number(offer.id)}, ${Number(credit.id)}, this.value)"><option value="">Choose / confirm month</option>${options}</select></label>` : ''}
                 </div></div>`;
         }

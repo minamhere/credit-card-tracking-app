@@ -433,6 +433,7 @@ class OfferTracker {
         if (action === 'sync') await this.syncPlaid(connectionId);
         if (action === 'reconnect') await this.reconnectPlaid(connectionId);
         if (action === 'review') await this.reviewPlaidTransactions();
+        if (action === 'retry-review') await this.retryAutomaticReview();
         if (action === 'disconnect' && confirm('Disconnect this Citi card? Imported transactions will remain.')) await this.disconnectPlaid(connectionId);
     }
 
@@ -490,8 +491,23 @@ class OfferTracker {
     async syncPlaid(connectionId) {
         try {
             const result = await this.dataManager.dbManager.syncPlaidConnection(connectionId);
-            this.setPlaidMessage(`Sync complete: ${result.added} added, ${result.modified} updated, ${result.removed} removed.`, 'success');
+            this.setPlaidMessage(`Sync complete: ${result.added} added, ${result.modified} updated, ${result.removed} removed.${result.review ? ` ${result.review.imported} purchases imported, ${result.review.creditsMatched} credits matched; ${result.review.remainingReviewCount} need review.` : ''}${result.reviewError ? ` ${result.reviewError}` : ''}`, result.reviewError ? 'error' : 'success');
+            await this.renderTransactions();
+            await this.renderAccountEvents();
+            await this.renderDashboard();
             await this.renderPlaidConnection();
+        } catch (error) { this.setPlaidMessage(error.message, 'error'); }
+    }
+
+    async retryAutomaticReview() {
+        try {
+            const result = await this.dataManager.dbManager.reviewTransactions();
+            this.setPlaidMessage(`${result.imported} purchases imported, ${result.creditsMatched} credits matched, ${result.remainingReviewCount} items need review.`, 'success');
+            await this.renderPlaidConnection();
+            await this.renderTransactions();
+            await this.renderAccountEvents();
+            await this.renderDashboard();
+            await this.loadPlaidReview();
         } catch (error) { this.setPlaidMessage(error.message, 'error'); }
     }
 
@@ -577,7 +593,7 @@ class OfferTracker {
 
         const rows = this.importPreview.map((item, index) => {
             const selectable = !item.duplicate && !item.ambiguous && !item.invalid && item.lifecycleStatus !== 'conflicted';
-            const status = item.lifecycleStatus === 'conflicted' ? 'Conflict — resolve before importing' : item.invalid ? 'Invalid' : item.ambiguous ? 'Possible duplicate — review source records' : item.duplicate ? 'Already imported' : item.existingMatch ? 'Matches existing — select to link, not add another purchase' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : 'Needs category';
+            const status = item.lifecycleStatus === 'conflicted' ? 'Conflict — resolve before importing' : item.invalid ? 'Invalid' : item.ambiguous ? 'Possible duplicate — review source records' : item.duplicate ? 'Already imported' : item.existingMatch ? 'Matches existing — select to link, not add another purchase' : !isPurchase(item) || item.amount <= 0 ? this.escapeHtml(item.transactionType || 'Credit/payment') : item.categories.length ? 'Categorized' : (item.reviewReason || 'Needs category');
             return `
                 <tr class="excluded-row">
                     <td><input type="checkbox" class="import-select" data-index="${index}" ${selectable ? '' : 'disabled'}></td>
@@ -721,7 +737,7 @@ class OfferTracker {
                 this.dataManager.dbManager.getAccountEvents(),
                 this.dataManager.getOffers()
             ]);
-            const unassigned = events.filter(event => !event.assignedOfferCreditId);
+            const unassigned = events.filter(event => !event.assignedOfferCreditId || event.requiresReview || /duplicate/i.test(event.reviewReason || ''));
             if (!unassigned.length) {
                 container.innerHTML = '<p>No unassigned statement credits.</p>';
                 return;
@@ -730,9 +746,9 @@ class OfferTracker {
             container.innerHTML = unassigned.map(event => `
                 <div class="account-event">
                     <div><strong>$${Math.abs(Number(event.amount)).toFixed(2)}</strong><small>${this.escapeHtml(event.date)} · ${this.escapeHtml(event.eventType)}</small></div>
-                    <span>${this.escapeHtml(event.description)}</span>
-                    <select id="account-event-offer-${event.id}"><option value="">Assign to offer…</option>${options}</select>
-                    <button type="button" class="small-btn" onclick="tracker.assignAccountEvent(${event.id})">Assign</button>
+                    <span>${this.escapeHtml(event.description)}${event.reviewReason ? `<small>${this.escapeHtml(event.reviewReason)}</small>` : ''}</span>
+                    ${!event.assignedOfferCreditId && CreditMatcher.isPotentialOfferCredit(event) ? `<select id="account-event-offer-${event.id}"><option value="">Assign to offer…</option>${options}</select>
+                    <button type="button" class="small-btn" onclick="tracker.assignAccountEvent(${event.id})">Assign</button>` : ''}
                 </div>`).join('');
         } catch (error) {
             container.innerHTML = '<p>Account events could not be loaded.</p>';
@@ -1207,6 +1223,7 @@ class OfferTracker {
         document.getElementById('edit-transaction-amount').value = transaction.amount;
         document.getElementById('edit-transaction-merchant').value = transaction.merchant;
         document.getElementById('edit-transaction-description').value = transaction.description || '';
+        document.getElementById('edit-transaction-remember').checked = false;
 
         // Check the appropriate category checkboxes
         const editCategoryCheckboxes = document.querySelectorAll('input[name="edit-transaction-category"]');
@@ -1266,6 +1283,7 @@ class OfferTracker {
             merchant: document.getElementById('edit-transaction-merchant').value,
             categories: categories,
             description: document.getElementById('edit-transaction-description').value || '',
+            saveRule: document.getElementById('edit-transaction-remember').checked,
             personId: parseInt(personId)
         };
 
@@ -1500,42 +1518,7 @@ class OfferTracker {
         let autoMatchWarning = '';
 
         try {
-            // Load the dashboard first, then retry credits through the same
-            // per-event assignment API used by the manual workflow. This also
-            // handles credits imported before their corresponding offer.
-            let allOffers = await this.dataManager.getSimplifiedOfferList();
-            try {
-                const events = await this.dataManager.dbManager.getAccountEvents();
-                let matched = 0;
-                let pendingEvents = events
-                    .filter(item => !item.assignedOfferCreditId)
-                    .sort((a, b) => Number(a.id) - Number(b.id));
-                let matchedThisPass = 0;
-                do {
-                    matchedThisPass = 0;
-                    const stillPending = [];
-                    for (const event of pendingEvents) {
-                        const match = CreditMatcher.findCreditMatch(event, allOffers.map(offer => ({ offer, progress: offer.progress })));
-                        if (!match.matched) {
-                            stillPending.push(event);
-                            continue;
-                        }
-                        await this.dataManager.dbManager.assignAccountEvent(event.id, match.offerId);
-                        matched++;
-                        matchedThisPass++;
-                        const matchedOffer = allOffers.find(offer => Number(offer.id) === Number(match.offerId));
-                        if (matchedOffer) {
-                            matchedOffer.credits = [...(matchedOffer.credits || []), { amount: Math.abs(Number(event.amount)), postedDate: event.date, description: event.description }];
-                            matchedOffer.progress.postedCredits = Number(matchedOffer.progress.postedCredits || 0) + Math.abs(Number(event.amount));
-                        }
-                    }
-                    pendingEvents = stillPending;
-                } while (matchedThisPass > 0 && pendingEvents.length > 0);
-                if (matched) allOffers = await this.dataManager.getSimplifiedOfferList();
-            } catch (error) {
-                console.warn('Credit auto-match skipped:', error);
-                autoMatchWarning = `Automatic credit matching could not run: ${error.message || 'unknown error'}. The dashboard data below is still available.`;
-            }
+            const allOffers = await this.dataManager.getSimplifiedOfferList();
 
             // Separate visible and hidden offers
             const offers = allOffers.filter(o => !o.hidden);
@@ -2064,13 +2047,14 @@ class OfferTracker {
                 <div class="transaction-item" style="padding: 0.5rem 1rem; margin-bottom: 0.25rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1; font-size: 0.9rem;">
-                            ${formatDate(transaction.date)} • <strong>${transaction.merchant}</strong> • $${transaction.amount.toFixed(2)}${(transaction.categories || []).length > 0 ? ` • ${transaction.categories.join(', ')}` : ''}
+                            ${formatDate(transaction.date)} • <strong>${this.escapeHtml(transaction.merchant)}</strong> • $${transaction.amount.toFixed(2)}${(transaction.categories || []).length > 0 ? ` • ${this.escapeHtml(transaction.categories.join(', '))}` : ''}
                         </div>
                         <div style="white-space: nowrap; margin-left: 1rem;">
                             <button class="btn-secondary" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; margin-right: 0.25rem;" onclick="tracker.editTransaction(${transaction.id})">Edit</button>
                             <button class="btn-danger" style="padding: 0.2rem 0.4rem; font-size: 0.75rem;" onclick="tracker.deleteTransaction(${transaction.id})">Delete</button>
                         </div>
                     </div>
+                    ${transaction.reviewMetadata?.method === 'automatic' ? `<small>Automatically reviewed · ${this.escapeHtml(transaction.reviewMetadata.reason || 'Matched merchant rule')}</small>` : ''}
                     ${matchingOffersHtml}
                 </div>
             `;

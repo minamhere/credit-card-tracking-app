@@ -19,6 +19,8 @@ test('automatic review imports trusted current-account rows, leaves uncertainty,
  const service=createTransactionReviewService({pool:h.pool,importService,creditReview,environment:'production'});
  const first=await service.reviewPerson(1);assert.equal(first.imported,1);assert.equal(first.remainingReviewCount,1);
  assert.match(first.reasons[0].reason,/Unknown/);
+ const status=await require('../plaid-connections').createConnectionService({pool:h.pool,plaidClient:{},config:{environment:'production'}}).getStatus(1);
+ assert.equal(status[0].reviewCount,1);assert.equal(status[0].lastReview.imported,1);
  assert.equal((await service.reviewPerson(1)).imported,0);
  await h.db.exec("INSERT INTO merchant_category_rules(merchant_pattern,merchant_name,categories) VALUES('UNKNOWN SHOP','Known shop',ARRAY['retail'])");
  assert.equal((await service.reviewPerson(1)).imported,1);

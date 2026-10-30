@@ -144,7 +144,10 @@ function createSyncService({ pool, plaidClient, connectionService, afterSync }) 
         const summary = await runAttempt(personId, connectionId);
         if (afterSync) {
           try { summary.review = await afterSync(personId, connectionId); }
-          catch (_) { summary.reviewError = 'Automatic review failed; retry review'; }
+          catch (_) {
+            summary.reviewError = 'Automatic review failed; retry review';
+            await pool.query('UPDATE financial_connections SET last_review_summary=$1 WHERE id=$2 AND person_id=$3',[{reviewError:summary.reviewError,reviewedAt:new Date().toISOString()},connectionId,personId]).catch(()=>{});
+          }
         }
         return summary;
       } catch (error) {

@@ -78,6 +78,7 @@
                         </div>
                     </div>
                     <div class="form-group">
+                        <label><input type="checkbox" id="edit-transaction-remember"> Remember these categories for this merchant</label>
                         <label for="edit-transaction-description">Description (optional):</label>
                         <input type="text" id="edit-transaction-description">
                     </div>
@@ -103,7 +104,7 @@
             <div id="transactions" class="tab-content">
                 <section class="import-panel">
                     <div class="section-heading">
-                        <div><h2>Automatic Citi Sync</h2><p>Connect one Citi card for this cardholder. Synced purchases remain reviewable before import.</p></div>
+                        <div><h2>Automatic Citi Sync</h2><p>Connect one Citi card for this cardholder. Recognized purchases are handled automatically. Uncertain items remain for review.</p></div>
                     </div>
                     <div id="plaid-connection" class="plaid-panel" aria-live="polite"></div>
                     <div id="plaid-message" class="import-message" aria-live="polite"></div>
@@ -326,14 +327,14 @@
     </div>
 
     <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
-    <script src="plaid-ui.js?v=20260929-1"></script>
+    <script src="plaid-ui.js?v=20261029-auto-review"></script>
     <script src="citi-csv.js?v=20260928-5"></script>
     <script src="offer-email-parser.js?v=20260928-5"></script>
     <script src="offer-engine.js?v=20260928-5"></script>
-    <script src="credit-matcher.js?v=20260928-5"></script>
-    <script src="monthly-dashboard.js?v=20261001-2"></script>
-    <script src="database.js?v=20261001-2"></script>
+    <script src="credit-matcher.js?v=20261029-auto-review"></script>
+    <script src="monthly-dashboard.js?v=20261029-auto-review"></script>
+    <script src="database.js?v=20261029-auto-review"></script>
     <script src="data-manager.js?v=20260928-5"></script>
-    <script src="app.js?v=20261001-2"></script>
+    <script src="app.js?v=20261029-auto-review"></script>
 </body>
 </html>
