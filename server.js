@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const OfferEngine = require('./offer-engine');
 const OfferEmailParser = require('./offer-email-parser');
 const CreditMatcher = require('./credit-matcher');
+const { classifyMerchant } = require('./merchant-classifier');
 const M365 = require('./m365');
 const { loadPlaidConfig } = require('./plaid-config');
 const { createPlaidClient } = require('./plaid-client');
@@ -80,37 +81,6 @@ function ruleMatches(rule, merchant) {
   const candidate = normalizeMerchant(merchant);
   const pattern = normalizeMerchant(rule.merchant_pattern);
   return rule.match_type === 'exact' ? candidate === pattern : candidate.includes(pattern);
-}
-
-// Starting suggestions for merchants observed in Citi exports. User-saved rules
-// are checked first and always override these defaults.
-const defaultMerchantRules = [
-  { pattern: 'LOST ISLAND', merchant: 'Lost Island', categories: ['entertainment'] },
-  { pattern: 'TRADER JOE', merchant: "Trader Joe's", categories: ['grocery'] },
-  { pattern: 'KING SOOPERS', merchant: 'King Soopers', categories: ['grocery'] },
-  { pattern: 'MAVERIK', merchant: 'Maverik', categories: ['gas'] },
-  { pattern: 'TARGET', merchant: 'Target', categories: ['retail'] },
-  { pattern: 'TJMAXX', merchant: 'TJ Maxx', categories: ['retail'] },
-  { pattern: 'HOME DEPOT', merchant: 'Home Depot', categories: ['retail'] },
-  { pattern: 'WELCOME TO LV', merchant: 'Welcome to Las Vegas', categories: ['retail'] },
-  { pattern: 'COORS FIELD MRC', merchant: 'Coors Field Merchandise', categories: ['retail'] },
-  { pattern: 'UBER CASH', merchant: 'Uber Cash', categories: ['transportation'] },
-  { pattern: "CHILI'S", merchant: "Chili's", categories: ['restaurant'] },
-  { pattern: 'ILLEGAL PETE', merchant: "Illegal Pete's", categories: ['restaurant'] },
-  { pattern: 'PORT OF SUBS', merchant: 'Port of Subs', categories: ['restaurant'] },
-  { pattern: 'TOKYO JOES', merchant: "Tokyo Joe's", categories: ['restaurant'] },
-  { pattern: 'KB COFFEE', merchant: 'KB Coffee & Bakery', categories: ['restaurant'] },
-  { pattern: 'LOST FRIEND BREWIN', merchant: 'Lost Friend Brewing', categories: ['restaurant'] },
-  { pattern: 'GOAT PATCH', merchant: 'Goat Patch Brewing', categories: ['restaurant'] },
-  { pattern: 'GREATDIVIDEBREWERY', merchant: 'Great Divide Brewery', categories: ['restaurant'] },
-  { pattern: 'CARBOY WINERY', merchant: 'Carboy Winery', categories: ['restaurant'] },
-  { pattern: 'FRESH ATTRACTION', merchant: 'Fresh Attraction', categories: ['restaurant'] },
-  { pattern: 'COORS FIELD GENER', merchant: 'Coors Field Concessions', categories: ['restaurant'] }
-];
-
-function findDefaultMerchantRule(merchant) {
-  const candidate = normalizeMerchant(merchant);
-  return defaultMerchantRules.find(rule => candidate.includes(rule.pattern));
 }
 
 function serializeOffer(row, credits = []) {
@@ -799,9 +769,8 @@ app.get('/api/plaid/review', async (req, res) => {
     for (const row of externalResult.rows) {
       const item = projectExternalTransaction(row);
       if (!item) continue;
-      const matchingRule = rulesResult.rows.find(rule => ruleMatches(rule, item.originalMerchant));
-      const defaultRule = matchingRule ? null : findDefaultMerchantRule(item.originalMerchant);
-      const merchant = matchingRule ? matchingRule.merchant_name : (defaultRule ? defaultRule.merchant : item.merchant);
+      const classification = classifyMerchant(item.originalMerchant, rulesResult.rows);
+      const merchant = classification.source === 'unknown' ? item.merchant : classification.merchant;
       const matches = item.transactionType === 'purchase' ? await findPurchaseMatches(pool, {
         personId, date: item.date, amount: item.amount, merchant, rawMerchant: item.originalMerchant,
         external: true, connectionId: row.connection_id, itemGeneration: row.item_generation, accountId: row.financial_account_id
@@ -810,9 +779,10 @@ app.get('/api/plaid/review', async (req, res) => {
       transactions.push({
         ...item,
         categories: allocation.status === 'duplicate' ? (allocation.rows[0].categories || [])
-          : matchingRule ? matchingRule.categories : (defaultRule ? defaultRule.categories : []),
+          : classification.categories,
         merchant,
-        matchedRuleId: matchingRule ? matchingRule.id : null,
+        matchedRuleId: classification.matchedRuleId,
+        reviewReason: classification.reason,
         invalid: false,
         duplicate: false,
         existingMatch: allocation.status === 'duplicate',
@@ -921,9 +891,8 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
       const hash = transactionHash(personId, itemWithOccurrence);
       const transactionType = String(item.transactionType || 'purchase').toLowerCase();
       const isPurchase = transactionType === 'purchase' && amount > 0;
-      const matchingRule = rulesResult.rows.find(rule => ruleMatches(rule, item.merchant));
-      const defaultRule = matchingRule ? null : findDefaultMerchantRule(item.merchant);
-      const merchant = matchingRule ? matchingRule.merchant_name : (defaultRule ? defaultRule.merchant : String(item.merchant).trim());
+      const classification = classifyMerchant(item.merchant, rulesResult.rows);
+      const merchant = classification.merchant;
       const duplicateResult = isPurchase ? await pool.query(`
         SELECT id FROM transactions
         WHERE person_id = $1 AND transaction_type = $6 AND (
@@ -959,9 +928,9 @@ app.post('/api/transaction-imports/preview', async (req, res) => {
         reconciledTransactionId: isPurchase && availableMatches.length === 1 ? Number(availableMatches[0].id) : null,
         reconciledEventId: !isPurchase && availableMatches.length === 1 ? Number(availableMatches[0].id) : null,
         invalid: false,
-        categories: matchingRule ? matchingRule.categories : (defaultRule ? defaultRule.categories : []),
+        categories: classification.categories,
         merchant,
-        matchedRuleId: matchingRule ? matchingRule.id : null
+        matchedRuleId: classification.matchedRuleId
       });
     }
     res.json({ transactions: preview });

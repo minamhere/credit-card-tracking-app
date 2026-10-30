@@ -290,3 +290,7 @@ BEGIN
         VALUES ('one_time_clean_reset_2026_09_27');
     END IF;
 END $$;
+
+-- Preserve the known retail offer exclusion on the original built-in mapping.
+UPDATE merchant_category_rules SET categories = ARRAY['retail', 'home-improvement'], updated_at = CURRENT_TIMESTAMP
+WHERE UPPER(TRIM(merchant_name)) = 'HOME DEPOT' AND categories = ARRAY['retail']::text[];
