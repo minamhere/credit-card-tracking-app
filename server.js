@@ -10,6 +10,7 @@ const CreditMatcher = require('./credit-matcher');
 const { createCreditReviewService } = require('./credit-review-service');
 const { createTransactionImportService } = require('./transaction-import-service');
 const { withPersonLock } = require('./review-lock');
+const { createTransactionReviewService } = require('./transaction-review-service');
 const { classifyMerchant } = require('./merchant-classifier');
 const M365 = require('./m365');
 const { loadPlaidConfig } = require('./plaid-config');
@@ -39,7 +40,7 @@ const pool = new Pool({
 const plaidConfig = loadPlaidConfig();
 const plaidClient = plaidConfig.clientId ? createPlaidClient(plaidConfig) : null;
 const plaidConnections = plaidClient ? createConnectionService({ pool, plaidClient, config: plaidConfig }) : null;
-const plaidSync = plaidClient ? createSyncService({ pool, plaidClient, connectionService: plaidConnections }) : null;
+const plaidSync = plaidClient ? createSyncService({ pool, plaidClient, connectionService: plaidConnections, afterSync: (personId,connectionId) => transactionReview.reviewPerson(personId,{connectionId}) }) : null;
 const plaidScheduler = plaidSync ? createPlaidScheduler({
   syncService: plaidSync,
   intervalMs: plaidConfig.syncIntervalMs,
@@ -164,6 +165,7 @@ async function findDuplicateOffer(personId, fingerprint) {
 
 const creditReview = createCreditReviewService({ serializeOffer });
 const transactionImport = createTransactionImportService({ pool, creditReview, environment: plaidConfig.environment });
+const transactionReview = createTransactionReviewService({ pool, importService: transactionImport, creditReview, environment: plaidConfig.environment });
 
 // Run migrations on startup
 async function runMigrations() {

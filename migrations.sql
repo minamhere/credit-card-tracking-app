@@ -305,3 +305,5 @@ BEGIN
   CREATE UNIQUE INDEX IF NOT EXISTS account_events_unique_credit_idx ON account_events(assigned_offer_credit_id) WHERE assigned_offer_credit_id IS NOT NULL;
  END IF;
 END $$;
+
+ALTER TABLE financial_connections ADD COLUMN IF NOT EXISTS last_review_summary JSONB;

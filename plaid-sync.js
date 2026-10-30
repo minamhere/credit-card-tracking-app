@@ -6,7 +6,7 @@ const ATTENTION_REQUIRED_CODES = new Set([
   'ITEM_LOCKED', 'ITEM_NOT_SUPPORTED', 'INVALID_CREDENTIALS', 'OAUTH_ERROR'
 ]);
 
-function createSyncService({ pool, plaidClient, connectionService }) {
+function createSyncService({ pool, plaidClient, connectionService, afterSync }) {
   async function recordFailure(personId, connectionId, error) {
     const status = ATTENTION_REQUIRED_CODES.has(error.code) ? 'attention_required' : 'error';
     await pool.query(`
@@ -141,7 +141,12 @@ function createSyncService({ pool, plaidClient, connectionService }) {
     let mutationRetries = 0;
     while (true) {
       try {
-        return await runAttempt(personId, connectionId);
+        const summary = await runAttempt(personId, connectionId);
+        if (afterSync) {
+          try { summary.review = await afterSync(personId, connectionId); }
+          catch (_) { summary.reviewError = 'Automatic review failed; retry review'; }
+        }
+        return summary;
       } catch (error) {
         if (error.code === PAGINATION_MUTATION && mutationRetries < 2) {
           mutationRetries++;

@@ -171,3 +171,11 @@ test('keeps rate limiting retryable without requiring reconnection', async () =>
   const failure = db.calls.find(call => call.sql.includes('last_error_code'));
   assert.ok(failure.sql.includes("status = 'error'"));
 });
+test('post-sync review failures preserve provider success and retry even without new additions', async () => {
+ const {createSyncService}=require('../plaid-sync');
+ const db=fakeDb();let attempts=0;
+ const service=createSyncService({pool:db,connectionService:connectionService(),plaidClient:{async syncTransactions(){return {added:[],modified:[],removed:[],nextCursor:'done',hasMore:false}}},afterSync:async()=>{attempts++;if(attempts===1)throw new Error('review failed');return {imported:1};}});
+ const first=await service.syncConnection(7,3);assert.equal(first.cursor,'done');assert.equal(first.reviewError,'Automatic review failed; retry review');
+ const next=await service.syncConnection(7,3);assert.equal(next.review.imported,1);assert.equal(attempts,2);
+ assert.equal(db.calls.filter(c=>c.sql==='COMMIT').length,2);
+});
