@@ -6,7 +6,7 @@ const event = { date: '2026-09-12', amount: -75.29, description: 'Statement Cred
 
 test('matches a statement credit to the unique exact outstanding offer', () => {
     const result = findCreditMatch(event, [
-        { offer: { id: 1, name: '8% offer', startDate: '2026-08-01', endDate: '2026-10-31', rewardConfig: { kind: 'percentage', rate: 8, cap: 90 } }, progress: { expectedReward: 75.29, postedCredits: 0 } },
+        { offer: { id: 1, name: '8% offer', startDate: '2026-08-01', endDate: '2026-10-31', rewardConfig: { kind: 'percentage', rate: 8, cap: 90 } }, progress: { expectedReward: 75.29, postedCredits: 0, eligibleTransactions: [{ id: 1, date: '2026-09-10', amount: 941.08 }] } },
         { offer: { id: 2, name: 'Retail', startDate: '2026-01-01', endDate: '2026-12-31', rewardConfig: { kind: 'percentage', rate: 5, cap: 80 } }, progress: { expectedReward: 0, postedCredits: 0 } }
     ]);
     assert.equal(result.matched, true);
@@ -65,6 +65,7 @@ test('matches an incremental percentage credit after an earlier credit posts', (
         [{
             offer: {
                 id: 1, name: '8% offer', measurement: { period: 'monthly' },
+                credits: [{ amount: 75.29, rewardMonth: '2026-09' }],
                 rewardConfig: { kind: 'percentage', rate: 8, activationThreshold: 900, cap: 90 }
             },
             progress: {

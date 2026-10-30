@@ -1,8 +1,8 @@
 (function (root, factory) {
-    const api = factory();
+    const api = factory(typeof module === 'object' && module.exports ? require('./offer-engine') : root.OfferEngine);
     if (typeof module === 'object' && module.exports) module.exports = api;
     if (root) root.CreditMatcher = api;
-})(typeof window !== 'undefined' ? window : globalThis, function () {
+})(typeof window !== 'undefined' ? window : globalThis, function (Engine) {
     const money = value => Math.round(Number(value || 0) * 100) / 100;
     const close = (a, b) => Math.abs(money(a) - money(b)) <= 0.02;
 
@@ -66,12 +66,16 @@
             const qualifyingSpend = money(rows.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0));
             details.push({ kind: 'day', key: `day:${day}`, amount: money(qualifyingSpend * rate), qualifyingSpend, transactions: rows });
         });
-        const available = details.filter(detail => detail.amount > 0);
-        // Do not reuse the same purchase/day evidence for repeated credits.
-        // Existing credits consume one matching evidence candidate each.
+        let available = details.filter(detail => detail.amount > 0);
         for (const credit of offer.credits || []) {
-            const index = available.findIndex(detail => close(detail.amount, credit.amount));
-            if (index >= 0) available.splice(index, 1);
+            const evidence = credit.matchEvidence || credit.match_evidence;
+            let used = evidence?.transactionIds || evidence?.allocations?.map(a => a.transactionId);
+            if (!used?.length) {
+                const matching = available.filter(detail => close(detail.amount, credit.amount));
+                used = matching.flatMap(detail => detail.transactions.map(t => t.id));
+            }
+            const consumed = new Set(used || []);
+            available = available.filter(detail => !detail.transactions.some(t => consumed.has(t.id)));
         }
         return available;
     }
@@ -128,19 +132,161 @@
         return { score, reasons };
     }
 
-    function findCreditMatch(event, candidates) {
-        if (!isPotentialOfferCredit(event)) return { matched: false, reason: 'not an offer credit', rankings: [] };
-        const rankings = candidates
-            .map(candidate => ({ ...candidate, ...scoreCandidate(event, candidate) }))
-            .filter(candidate => candidate.score > 0)
-            .sort((a, b) => b.score - a.score);
-        const best = rankings[0];
-        const runnerUp = rankings[1];
-        const confident = best && best.score >= 80 && (!runnerUp || best.score - runnerUp.score >= 20);
-        return confident
-            ? { matched: true, offerId: best.offer.id, offerName: best.offer.name, score: best.score, reasons: best.reasons, rankings }
-            : { matched: false, reason: best ? 'ambiguous offer credit' : 'no matching offer', rankings };
+    function earnedMonth(event) {
+        const months = [];
+        if (event.rewardMonth) {
+            if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(event.rewardMonth)) return { invalid: true };
+            months.push(event.rewardMonth);
+        }
+        const ranges = [...String(event.description || '').matchAll(/(\d{1,2}\/\d{1,2}\/\d{2,4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/g)];
+        function parse(value) {
+            let [m,d,y] = value.split('/').map(Number);
+            if (y < 100) y += 2000;
+            const date = new Date(Date.UTC(y,m-1,d));
+            return date.getUTCFullYear() === y && date.getUTCMonth() === m-1 && date.getUTCDate() === d
+                ? `${y}-${String(m).padStart(2,'0')}` : null;
+        }
+        for (const range of ranges) {
+            const a = parse(range[1]), b = parse(range[2]);
+            if (!a || !b || a !== b || Date.parse(range[1]) > Date.parse(range[2])) return { invalid: true };
+            months.push(a);
+        }
+        if (new Set(months).size > 1) return { invalid: true };
+        return { month: months[0] || null };
     }
 
-    return { isPotentialOfferCredit, percentageCheckpointDetails, percentageCheckpoints, percentagePurchaseDetails, scoreCandidate, findCreditMatch };
+    const cents = value => Math.round((Number(value) + Number.EPSILON) * 100);
+    function eventIdentity(event) {
+        return [String(event.date || '').slice(0,10), cents(Math.abs(Number(event.amount))),
+            String(event.description || '').trim().replace(/\s+/g,' ').toUpperCase()].join('|');
+    }
+
+    function periodPlans(event, { offer: rawOffer, progress }) {
+        const offer = Engine.normalizeOffer(rawOffer);
+        if (!progress || (offer.reviewStatus && offer.reviewStatus !== 'confirmed')) return [];
+        const amount = cents(Math.abs(Number(event.amount)));
+        const requested = earnedMonth(event);
+        if (requested.invalid) return [];
+        const rows = [...(progress.eligibleTransactions || [])].sort((a,b) => String(a.date).localeCompare(String(b.date)) || Number(a.id)-Number(b.id));
+        const monthly = offer.measurement.period === 'monthly';
+        const periods = monthly ? [...new Set(rows.map(t => String(t.date).slice(0,7)))] : ['offer'];
+        const rewards = new Map(periods.map(period => {
+            const ts = rows.filter(t => !monthly || String(t.date).slice(0,7) === period);
+            const metric = offer.measurement.kind === 'count' ? ts.length : ts.reduce((s,t)=>s+Number(t.amount),0);
+            return [period, cents(Engine.calculateReward(metric,offer.rewardConfig).earnedReward)];
+        }));
+        const result = [];
+        for (const period of periods) {
+            if (requested.month && monthly && requested.month !== period) continue;
+            const ts = rows.filter(t => !monthly || String(t.date).slice(0,7) === period);
+            const expected = rewards.get(period);
+            if (!expected || !ts.length || ts.some(t => !t.id)) continue;
+            const credits = [];
+            let uncertain = false;
+            for (const credit of offer.credits || []) {
+                const inferred = earnedMonth(credit);
+                if (inferred.invalid) { uncertain = true; break; }
+                let belongs = inferred.month;
+                if (!belongs && monthly) {
+                    const earningPeriods = periods.filter(p => rewards.get(p) > 0);
+                    if (earningPeriods.length !== 1) { uncertain = true; break; }
+                    belongs = earningPeriods[0];
+                }
+                if (!monthly || belongs === period) credits.push(credit);
+            }
+            if (uncertain) continue;
+            const posted = credits.reduce((s,c)=>s+cents(c.amount),0);
+            const outstanding = expected - posted;
+            if (amount <= 0 || amount > outstanding) continue;
+            const percentage = offer.rewardConfig.kind === 'percentage';
+            let accumulated = 0, previous = 0;
+            const budgets = ts.map(t => {
+                accumulated += Number(t.amount);
+                const gross = percentage ? Math.min(cents(accumulated * Number(offer.rewardConfig.rate) / 100),
+                    offer.rewardConfig.cap == null ? Infinity : cents(offer.rewardConfig.cap)) : 0;
+                const available = Math.max(0,gross-previous); previous = gross;
+                return { transaction: t, available };
+            });
+            const threshold = Number(offer.rewardConfig.activationThreshold || 0);
+            function options() {
+                const candidates = [];
+                const positive = budgets.filter(b=>b.available > 0);
+                const add = (kind, list, value) => { if(value > 0) candidates.push({kind,list,value}); };
+                if (percentage && threshold === 0) {
+                    positive.forEach(b=>add('transaction',[b],b.available));
+                    const days = new Map();
+                    positive.forEach(b=>{const key=String(b.transaction.date).slice(0,10);days.set(key,[...(days.get(key)||[]),b]);});
+                    for(const list of days.values()) if(list.length>1)add('day',list,list.reduce((s,b)=>s+b.available,0));
+                }
+                if (percentage && threshold > 0) {
+                    let spend=0;
+                    for(let i=0;i<ts.length;i++) {
+                        spend += Number(ts[i].amount);
+                        if(spend >= threshold) {
+                            const list=budgets.slice(0,i+1).filter(b=>b.available>0);
+                            add('checkpoint',list,list.reduce((s,b)=>s+b.available,0));
+                        }
+                    }
+                }
+                if (percentage) add('outstanding',positive,positive.reduce((s,b)=>s+b.available,0));
+                return candidates;
+            }
+            if (percentage) {
+                for (const credit of credits) {
+                    const evidence = credit.matchEvidence || credit.match_evidence;
+                    if (evidence?.allocations?.length) {
+                        if (evidence.status === 'needs_review' || evidence.allocations.reduce((sum,a)=>sum+cents(a.amount),0) !== cents(credit.amount)) {uncertain=true;break;}
+                        for (const allocation of evidence.allocations) {
+                            const b = budgets.find(b=>Number(b.transaction.id)===Number(allocation.transactionId));
+                            if (!b || cents(allocation.amount)>b.available) {uncertain=true;break;}
+                            b.available -= cents(allocation.amount);
+                        }
+                    } else {
+                        const matches = options().filter(o=>Math.abs(o.value-cents(credit.amount))<=2 && cents(credit.amount)<=o.value);
+                        const unique = new Map(matches.map(o=>[o.list.map(b=>b.transaction.id).join(','),o]));
+                        if(unique.size !== 1) {uncertain=true;break;}
+                        let remaining=cents(credit.amount);
+                        for(const b of [...unique.values()][0].list) {const used=Math.min(b.available,remaining); b.available-=used;remaining-=used;}
+                        if(remaining) {uncertain=true;break;}
+                    }
+                    if(uncertain)break;
+                }
+                if(uncertain)continue;
+                const matches=options().filter(o=>Math.abs(o.value-amount)<=2 && o.value>=amount);
+                const unique=new Map(matches.map(o=>[o.list.map(b=>b.transaction.id).join(','),o]));
+                if(unique.size!==1)continue;
+                const chosen=[...unique.values()][0];
+                let remaining=amount;
+                const allocations=chosen.list.map(b=>{const used=Math.min(b.available,remaining);remaining-=used;return {transactionId:b.transaction.id,amount:used/100};}).filter(a=>a.amount>0);
+                const transactionIds=allocations.map(a=>a.transactionId);
+                result.push({offer,progress,rewardMonth:monthly?period:null,score:100,
+                    reasons:[`amount matches ${chosen.kind === 'day' ? 'one day of qualifying purchases' : chosen.kind === 'transaction' ? 'one qualifying purchase' : chosen.kind === 'checkpoint' ? 'a reward checkpoint' : 'the remaining earned reward'}`],
+                    evidence:{version:1,kind:chosen.kind,rewardMonth:monthly?period:null,transactionIds,allocations,
+                        checkpointTransactionId:chosen.kind==='checkpoint'?transactionIds.at(-1):null,creditedAmount:amount/100}});
+            } else {
+                let metric=0;
+                const checkpoints=ts.map(t=>{metric+=offer.measurement.kind==='count'?1:Number(t.amount);return {t,reward:cents(Engine.calculateReward(metric,offer.rewardConfig).earnedReward)-posted};});
+                const checkpoint=checkpoints.find(c=>c.reward>=amount&&Math.abs(c.reward-amount)<=2);
+                if(!checkpoint)continue;
+                result.push({offer,progress,rewardMonth:monthly?period:null,score:100,reasons:['amount matches an unpaid reward checkpoint'],
+                    evidence:{version:1,kind:'checkpoint',rewardMonth:monthly?period:null,transactionIds:ts.slice(0,ts.indexOf(checkpoint.t)+1).map(t=>t.id),allocations:[],checkpointTransactionId:checkpoint.t.id,creditedAmount:amount/100}});
+            }
+        }
+        return result;
+    }
+
+    function findCreditMatch(event, candidates, { events = [] } = {}) {
+        if (!Number.isFinite(Number(event.amount)) || !Number(event.amount) || !isPotentialOfferCredit(event))
+            return { matched:false, reason:'not an offer credit', rankings:[] };
+        if(events.some(other=>Number(other.id)!==Number(event.id) && eventIdentity(other)===eventIdentity(event)))
+            return {matched:false,reason:'Possible duplicate statement credit; review source records',rankings:[]};
+        const rankings=candidates.flatMap(candidate=>periodPlans(event,candidate));
+        if(rankings.length!==1)return {matched:false,reason:rankings.length?'ambiguous offer or earned month':'No unique unpaid purchase evidence',rankings};
+        const best=rankings[0];
+        best.evidence.reasons=best.reasons;
+        return {matched:true,offerId:best.offer.id,offerName:best.offer.name,score:best.score,reasons:best.reasons,
+            rewardMonth:best.rewardMonth,evidence:best.evidence,rankings};
+    }
+
+    return { isPotentialOfferCredit, percentageCheckpointDetails, percentageCheckpoints, percentagePurchaseDetails, scoreCandidate, earnedMonth, eventIdentity, findCreditMatch };
 });
